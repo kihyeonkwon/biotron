@@ -90,12 +90,57 @@ export class World {
     const temperature = getTemperature(this.tickCount);
     const waterLevel = getWaterLevel(this.tickCount);
     const rates = getReactionRates(temperature, waterLevel);
+    this._lastTemperature = temperature;
+    this._lastWaterLevel = waterLevel;
+    this._lastRates = rates;
 
-    // Phase 1 step 2: diffusion. Apply discrete Laplacian to each species.
-    // Toroidal wrap so the grid has no edges (Phase 1 is uniform soup).
-    // No diffusion when fully dry (water level < -0.8).
+    // Phase 1 step 2: diffusion (gated off when fully dry)
     if (waterLevel >= -0.8) {
       this._diffuse(rates.diffusion);
+    }
+
+    // Phase 1 step 4: evaporative concentration during dry phase.
+    // When the surface is exposed (waterLevel < 0), water evaporates from cells
+    // and the molecules left behind get more concentrated. This is the chemical
+    // basis for surface polymerization (Deamer hot-pool model). Effect is small
+    // per tick but accumulates and shows clearly during low tide.
+    if (waterLevel < 0) {
+      this._evaporativeConcentration(-waterLevel);
+    }
+
+    // Phase 1 step 4: structure adsorption / desorption framework.
+    // (No structures exist until Phase 1 step 5; this is the dispatcher only.)
+    if (this.structures.length > 0) {
+      this._processAdsorption(rates);
+    }
+  }
+
+  _evaporativeConcentration(dryFactor) {
+    // Multiply each cell's concentration by a small factor (1 + 0.005 * dryFactor)
+    // BUT cap the total per cell to avoid runaway. This models the fact that
+    // water evaporates from exposed cells, leaving solutes behind.
+    // dryFactor ∈ [0, 1] (1 = fully dry).
+    const boost = 1 + 0.005 * dryFactor;
+    for (let s = 0; s < N_SPECIES; s++) {
+      const f = this.fields[s];
+      for (let k = 0; k < this.size; k++) {
+        const v = f[k] * boost;
+        f[k] = v > 5.0 ? 5.0 : v;  // saturation cap
+      }
+    }
+  }
+
+  _processAdsorption(rates) {
+    // Each structure may flip its surfaceBound state based on water level.
+    // - Wet conditions favor desorption (structures float into solution).
+    // - Dry conditions favor adsorption (structures stick to surface).
+    // No-op until structures exist (Phase 1 step 5).
+    for (const st of this.structures) {
+      if (st.surfaceBound) {
+        if (this._rand() < rates.desorption * 0.1) st.surfaceBound = false;
+      } else {
+        if (this._rand() < rates.adsorption * 0.1) st.surfaceBound = true;
+      }
     }
   }
 
