@@ -2,6 +2,60 @@ import { useEffect, useRef, useState } from 'react';
 import { World } from './simulation/world.js';
 import { renderWorld } from './renderer/canvas.js';
 
+function ChainHistogram({ lenHisto }) {
+  if (!lenHisto) return null;
+  // Bin: 2, 3, 4, 5, 6-9, 10-19, 20+
+  const bins = [
+    { label: '2', test: (L) => L === 2 },
+    { label: '3', test: (L) => L === 3 },
+    { label: '4', test: (L) => L === 4 },
+    { label: '5', test: (L) => L === 5 },
+    { label: '6-9', test: (L) => L >= 6 && L <= 9 },
+    { label: '10-19', test: (L) => L >= 10 && L <= 19 },
+    { label: '20+', test: (L) => L >= 20 },
+  ];
+  const counts = bins.map((b) => {
+    let n = 0;
+    for (const L in lenHisto) {
+      if (b.test(parseInt(L))) n += lenHisto[L];
+    }
+    return n;
+  });
+  const max = Math.max(1, ...counts);
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ fontSize: 8, color: '#444', marginBottom: 3 }}>length histogram</div>
+      <svg width="100%" height="40" viewBox="0 0 280 40" preserveAspectRatio="none">
+        {counts.map((c, i) => {
+          const w = 280 / counts.length;
+          const h = (c / max) * 32;
+          return (
+            <g key={i}>
+              <rect
+                x={i * w + 2}
+                y={32 - h}
+                width={w - 4}
+                height={h}
+                fill="#4ECDC4"
+                opacity={c > 0 ? 0.8 : 0.2}
+              />
+              <text
+                x={i * w + w / 2}
+                y={39}
+                fill="#666"
+                fontSize="6"
+                textAnchor="middle"
+              >
+                {bins[i].label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 const GRID_W = 200;
 const GRID_H = 200;
 const CELL_PX = 3;          // canvas cell size
@@ -154,13 +208,14 @@ export default function App() {
             <span className="label">H-bonded</span>
             <span className="value">{stats.hBondedChains ?? 0}</span>
           </div>
+          <ChainHistogram lenHisto={stats.lenHisto} />
         </div>
 
         <div className="section">
           <div className="section-title">phase</div>
           <div className="row">
             <span className="label">build status</span>
-            <span className="value">phase 1 / step 5</span>
+            <span className="value">phase 1 / step 7</span>
           </div>
           <div className="row">
             <span className="label">grid</span>
