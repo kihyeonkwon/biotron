@@ -8,7 +8,11 @@
 
 import { N_SPECIES, SPECIES, SPECIES_INDEX, INITIAL_CONCENTRATION } from './constants.js';
 import { getTemperature, getWaterLevel, getReactionRates } from './environment.js';
-import { polymerizeRNA, processHydrogenBonds } from './reactions.js';
+import {
+  polymerizeRNA,
+  processHydrogenBonds,
+  templatedExtension,
+} from './reactions.js';
 import { resetRNAIds } from './rna.js';
 
 export class World {
@@ -117,6 +121,11 @@ export class World {
     // Phase 1 step 6: hydrogen bonding between complementary strands (R3)
     if (this.structures.length > 1) {
       processHydrogenBonds(this, rates);
+    }
+
+    // Phase 2 step 8 + 10: templated extension (with mutation) on H-bonded pairs (R4 + R5)
+    if (this.structures.length > 1) {
+      templatedExtension(this, rates);
     }
 
     // Phase 1 step 4: structure adsorption / desorption

@@ -4,7 +4,7 @@
 // Reactions are batched per-tick by world.tick().
 
 import { N_SPECIES, SPECIES_INDEX } from './constants.js';
-import { makeRNA, NUCLEOTIDES, isComplementary } from './rna.js';
+import { makeRNA, NUCLEOTIDES, COMPLEMENT, isComplementary } from './rna.js';
 
 const A_IDX = SPECIES_INDEX.A;
 const U_IDX = SPECIES_INDEX.U;
@@ -186,6 +186,78 @@ function _pairScore(a, b) {
 function _findById(structures, id) {
   for (const s of structures) if (s.id === id) return s;
   return null;
+}
+
+/**
+ * Phase 2 step 8 + 10: Templated polymerization with mutation (R4 + R5).
+ *
+ * For each H-bonded pair where the two strands have unequal lengths, the
+ * shorter one is the "growing copy" of the longer "template". We try to
+ * extend the copy by one base, using the complement of the next template
+ * position. With probability mutationRate the wrong base is added instead.
+ *
+ * Replication emerges when:
+ *   1. A template T templates a copy C (R4 templated)
+ *   2. Hot phase separates them (R3 break)
+ *   3. C templates a new C' (which is the complement of C, == T's sequence)
+ * No code change needed for step 9 — separation is already part of R3.
+ */
+export function templatedExtension(world, rates) {
+  if (rates.backboneFormTemplated < 0.01) return 0;
+  let extended = 0;
+  for (const a of world.structures) {
+    if (a.type !== 'rna' || a.hBondedTo == null) continue;
+    if (a.id > a.hBondedTo) continue;  // process each pair once
+
+    const b = _findById(world.structures, a.hBondedTo);
+    if (!b || b.type !== 'rna') continue;
+
+    // Identify template (longer) and copy (shorter, may be equal)
+    let template, copy;
+    if (a.sequence.length > b.sequence.length) {
+      template = a;
+      copy = b;
+    } else if (b.sequence.length > a.sequence.length) {
+      template = b;
+      copy = a;
+    } else {
+      continue;  // equal length → fully copied, skip
+    }
+
+    // Position on template that maps to the next slot on copy
+    // copy[i] pairs antiparallel with template[T_len - 1 - i]
+    // After extending copy, copy.length grows by 1, so we need template[T_len - 1 - copy.length]
+    const k = template.sequence.length - 1 - copy.sequence.length;
+    if (k < 0) continue;
+
+    const correct = COMPLEMENT[template.sequence[k]];
+    if (!correct) continue;  // safety
+
+    // Mutation roll
+    let nuc = correct;
+    if (world._rand() < rates.mutationRate) {
+      const others = NUCLEOTIDES.filter((n) => n !== correct);
+      nuc = others[Math.floor(world._rand() * others.length)];
+    }
+
+    // Check the cell has the chosen nucleotide
+    const cellIdx = copy.position.y * world.width + copy.position.x;
+    const fIdx = SPECIES_INDEX[nuc];
+    if (world.fields[fIdx][cellIdx] < 0.05) continue;
+
+    // Roll polymerization probability
+    const prob =
+      rates.backboneFormTemplated *
+      (copy.surfaceBound ? 1.0 : 0.5) *
+      (nuc === correct ? 1.0 : 0.3);  // mutations are slower
+    if (world._rand() >= prob) continue;
+
+    // Consume the nucleotide and append
+    world.fields[fIdx][cellIdx] = Math.max(0, world.fields[fIdx][cellIdx] - 0.05);
+    copy.sequence.push(nuc);
+    extended++;
+  }
+  return extended;
 }
 
 // Sample one nucleotide from a cell weighted by its concentration; consume it.
