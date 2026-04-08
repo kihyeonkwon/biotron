@@ -208,6 +208,30 @@ export default function App() {
             <span className="label">H-bonded</span>
             <span className="value">{stats.hBondedChains ?? 0}</span>
           </div>
+          <div className="row">
+            <span className="label">ribozymes</span>
+            <span className="value">{stats.ribozymes ?? 0}</span>
+          </div>
+          {stats.ribByType && (
+            <>
+              <div className="row" style={{ paddingLeft: 10 }}>
+                <span className="label">replicase</span>
+                <span className="value">{stats.ribByType.rna_replicase ?? 0}</span>
+              </div>
+              <div className="row" style={{ paddingLeft: 10 }}>
+                <span className="label">aminoacyl-T</span>
+                <span className="value">{stats.ribByType.aminoacyl_transferase ?? 0}</span>
+              </div>
+              <div className="row" style={{ paddingLeft: 10 }}>
+                <span className="label">peptidyl-T</span>
+                <span className="value">{stats.ribByType.peptidyl_transferase ?? 0}</span>
+              </div>
+            </>
+          )}
+          <div className="row">
+            <span className="label">peptides</span>
+            <span className="value">{stats.peptides ?? 0}</span>
+          </div>
           <ChainHistogram lenHisto={stats.lenHisto} />
         </div>
 
@@ -229,7 +253,7 @@ export default function App() {
           <div className="section-title">phase</div>
           <div className="row">
             <span className="label">build status</span>
-            <span className="value">phase 2 / step 12</span>
+            <span className="value">phase 3 / step 16</span>
           </div>
           <div className="row">
             <span className="label">grid</span>

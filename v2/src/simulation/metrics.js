@@ -80,7 +80,27 @@ export function createMilestoneTracker() {
       if (_completedCopies >= 5) reached[4] = tick;
     }
 
-    // M5-M9 are Phase 3+
+    // M5 — ribozyme emergence (any RNA chain has catalyticFunction)
+    if (!reached[5]) {
+      for (const s of structures) {
+        if (s.type === 'rna' && s.catalyticFunction != null) {
+          reached[5] = tick;
+          break;
+        }
+      }
+    }
+
+    // M6 — primitive translation (any peptide chain exists)
+    if (!reached[6]) {
+      for (const s of structures) {
+        if (s.type === 'peptide') {
+          reached[6] = tick;
+          break;
+        }
+      }
+    }
+
+    // M7-M9 are Phase 4
   }
 
   function getReached() {

@@ -15,6 +15,24 @@ export const COMPLEMENT = {
   C: 'G',
 };
 
+// Codon → amino acid (Yarus stereochemical hypothesis, 5 simplest amino acids)
+// These triplets have measurable physical-chemistry affinity for these AAs
+// independent of any biological machinery.
+export const CODON_AA = {
+  GCC: 'Ala',
+  GGC: 'Gly',
+  GUC: 'Val',
+  GAC: 'Asp',
+  GAG: 'Glu',
+};
+
+// Ribozyme motifs (R9 — encoded chemistry rule)
+export const RIBOZYME_MOTIFS = {
+  peptidyl_transferase: { motif: 'GGCGCC', minLength: 15 },
+  rna_replicase:        { motif: 'CCCUUU', minLength: 15 },
+  aminoacyl_transferase:{ motif: 'GGGAAACCC', minLength: 20 },
+};
+
 export function isComplementary(a, b) {
   return COMPLEMENT[a] === b;
 }
@@ -61,4 +79,36 @@ export function selfComplementarity(chain) {
 
 export function resetRNAIds() {
   _nextId = 1;
+}
+
+// Check whether an RNA chain qualifies as a ribozyme. Returns
+// {type, strength} or null. The combined strength formula is
+//   strength = 0.5 * GC_ratio + 0.5 * selfComplementarity
+// per the SPEC R9 update.
+export function detectRibozyme(chain) {
+  const seqStr = chain.sequence.join('');
+  const L = chain.sequence.length;
+  for (const [type, def] of Object.entries(RIBOZYME_MOTIFS)) {
+    if (L < def.minLength) continue;
+    if (seqStr.indexOf(def.motif) === -1) continue;
+    const strength = 0.5 * gcRatio(chain) + 0.5 * selfComplementarity(chain);
+    return { type, strength };
+  }
+  return null;
+}
+
+// Find all codon positions in a chain that are NOT yet attached to an AA.
+// Returns array of {index, aa} for codons that map to a known amino acid.
+export function findFreeCodons(chain) {
+  const seq = chain.sequence;
+  const L = seq.length;
+  const taken = new Set(chain.attachedAminoAcids.map((x) => x.index));
+  const out = [];
+  for (let i = 0; i + 3 <= L; i += 3) {
+    if (taken.has(i)) continue;
+    const codon = seq[i] + seq[i + 1] + seq[i + 2];
+    const aa = CODON_AA[codon];
+    if (aa) out.push({ index: i, aa });
+  }
+  return out;
 }

@@ -106,6 +106,9 @@ export function renderWorld(canvas, world, cellPx) {
 
   // Phase 1 step 5: draw RNA chains as dots over the field.
   drawRnaChains(ctx, world, cellPx);
+
+  // Phase 3 step 15: draw peptides as small colored bars above their parent cell.
+  drawPeptides(ctx, world, cellPx);
 }
 
 function drawHBonds(ctx, world, cellPx) {
@@ -151,11 +154,25 @@ function drawRnaChains(ctx, world, cellPx) {
     const g = Math.floor(220 - 100 * gcRatio);
     const b = Math.floor(220);
 
-    // Size grows with chain length: 2-mer ≈ cellPx; longer ≈ cellPx * (1 + log)
+    // Size grows with chain length
     const size = Math.max(cellPx, Math.min(cellPx * 4, cellPx * (1 + Math.log2(L))));
     const off = (size - cellPx) / 2;
 
-    // Halo for surface-bound (slightly brighter)
+    // Ribozyme: golden glow halo first, behind the chain
+    if (st.catalyticFunction != null) {
+      const glow = size * 1.6;
+      const goff = (glow - cellPx) / 2;
+      const grad = ctx.createRadialGradient(
+        px + cellPx / 2, py + cellPx / 2, 0,
+        px + cellPx / 2, py + cellPx / 2, glow / 2,
+      );
+      grad.addColorStop(0, 'rgba(255, 220, 90, 0.9)');
+      grad.addColorStop(1, 'rgba(255, 220, 90, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(px - goff, py - goff, glow, glow);
+    }
+
+    // Chain body
     if (st.surfaceBound) {
       ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.95)`;
     } else {
@@ -163,10 +180,29 @@ function drawRnaChains(ctx, world, cellPx) {
     }
     ctx.fillRect(px - off, py - off, size, size);
 
-    // For long chains, add a white core
+    // Long chain: white core
     if (L >= 6) {
       ctx.fillStyle = 'rgba(255,255,255,0.7)';
       ctx.fillRect(px + cellPx * 0.25, py + cellPx * 0.25, cellPx * 0.5, cellPx * 0.5);
+    }
+  }
+}
+
+const PEPTIDE_COLOR = {
+  Gly: '#f0f0f0', Ala: '#ffb4c8', Val: '#ffa040',
+  Asp: '#dc5050', Glu: '#b464dc',
+};
+
+function drawPeptides(ctx, world, cellPx) {
+  for (const st of world.structures) {
+    if (st.type !== 'peptide') continue;
+    const px = st.position.x * cellPx;
+    const py = st.position.y * cellPx;
+    const len = st.sequence.length;
+    const segW = Math.max(2, cellPx * 1.5 / len);
+    for (let i = 0; i < len; i++) {
+      ctx.fillStyle = PEPTIDE_COLOR[st.sequence[i]] || '#ccc';
+      ctx.fillRect(px + i * segW, py - cellPx, segW - 0.5, cellPx * 0.6);
     }
   }
 }

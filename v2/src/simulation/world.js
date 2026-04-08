@@ -13,6 +13,9 @@ import {
   processHydrogenBonds,
   templatedExtension,
   degradeAndSupply,
+  activateRibozymes,
+  attachAminoAcids,
+  formPeptideBonds,
 } from './reactions.js';
 import { resetRNAIds } from './rna.js';
 import { createMilestoneTracker } from './metrics.js';
@@ -133,6 +136,22 @@ export class World {
       templatedExtension(this, rates);
     }
 
+    // Phase 3 step 14: ribozyme activation (R9). Refresh every 8 ticks
+    // (sequence-changing events are infrequent compared to tick rate).
+    if (this.tickCount % 8 === 0 && this.structures.length > 0) {
+      activateRibozymes(this);
+    }
+
+    // Phase 3 step 13: codon → amino acid attachment (R7)
+    if (this.structures.length > 0) {
+      attachAminoAcids(this, rates);
+    }
+
+    // Phase 3 step 15: peptide bond formation (R8)
+    if (this.structures.length > 0) {
+      formPeptideBonds(this, rates);
+    }
+
     // Phase 2 step 11: degradation + ocean supply (R6)
     degradeAndSupply(this, rates);
 
@@ -238,6 +257,7 @@ export class World {
 
     // Chain length histogram (Phase 1 step 5+)
     const rnaChains = this.structures.filter((s) => s.type === 'rna');
+    const peptides = this.structures.filter((s) => s.type === 'peptide');
     const lenHisto = {};
     for (const ch of rnaChains) {
       const L = ch.sequence.length;
@@ -245,6 +265,9 @@ export class World {
     }
     const maxLen = rnaChains.reduce((m, ch) => Math.max(m, ch.sequence.length), 0);
     const hBondedCount = rnaChains.filter((c) => c.hBondedTo != null).length;
+    const ribozymes = rnaChains.filter((c) => c.catalyticFunction != null);
+    const ribByType = { peptidyl_transferase: 0, rna_replicase: 0, aminoacyl_transferase: 0 };
+    for (const r of ribozymes) ribByType[r.catalyticFunction.type]++;
 
     return {
       tick: this.tickCount,
@@ -256,6 +279,9 @@ export class World {
       maxRnaLen: maxLen,
       lenHisto,
       hBondedChains: hBondedCount,
+      ribozymes: ribozymes.length,
+      ribByType,
+      peptides: peptides.length,
       milestoneStatus: this.milestones.getStatus(),
     };
   }

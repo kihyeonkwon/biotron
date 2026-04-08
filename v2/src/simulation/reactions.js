@@ -4,7 +4,10 @@
 // Reactions are batched per-tick by world.tick().
 
 import { N_SPECIES, SPECIES_INDEX } from './constants.js';
-import { makeRNA, NUCLEOTIDES, COMPLEMENT, isComplementary, selfComplementarity } from './rna.js';
+import {
+  makeRNA, NUCLEOTIDES, COMPLEMENT, isComplementary, selfComplementarity,
+  detectRibozyme, findFreeCodons, CODON_AA,
+} from './rna.js';
 
 const A_IDX = SPECIES_INDEX.A;
 const U_IDX = SPECIES_INDEX.U;
@@ -204,6 +207,8 @@ function _findById(structures, id) {
  */
 export function templatedExtension(world, rates) {
   if (rates.backboneFormTemplated < 0.01) return 0;
+  // Phase 3 catalyst lookup: rna_replicase ribozyme grid
+  const repCatGrid = _ribozymeGridByType(world, 'rna_replicase');
   let extended = 0;
   for (const a of world.structures) {
     if (a.type !== 'rna' || a.hBondedTo == null) continue;
@@ -245,9 +250,11 @@ export function templatedExtension(world, rates) {
     const fIdx = SPECIES_INDEX[nuc];
     if (world.fields[fIdx][cellIdx] < 0.05) continue;
 
-    // Roll polymerization probability
+    // Roll polymerization probability (with replicase ribozyme boost)
+    const repBoost = repCatGrid[cellIdx] || 0;
     const prob =
       rates.backboneFormTemplated *
+      (1 + 5 * repBoost) *
       (copy.surfaceBound ? 1.0 : 0.5) *
       (nuc === correct ? 1.0 : 0.3);  // mutations are slower
     if (world._rand() >= prob) continue;
@@ -258,6 +265,133 @@ export function templatedExtension(world, rates) {
     extended++;
   }
   return extended;
+}
+
+/**
+ * Phase 3 step 14: Ribozyme activation (R9).
+ *
+ * For each RNA chain, check if it qualifies as a ribozyme. Cache the result
+ * on the chain. We re-check whenever the sequence changes — for simplicity
+ * we re-check every chain every N ticks (cheap with O(L) motif scan).
+ */
+export function activateRibozymes(world) {
+  for (const st of world.structures) {
+    if (st.type !== 'rna') continue;
+    if (st.sequence.length < 15) continue;  // shortest motif length
+    st.catalyticFunction = detectRibozyme(st);
+  }
+}
+
+/**
+ * Phase 3 step 13: Codon → amino acid attachment (R7).
+ *
+ * Scan each RNA chain for free codons that map to a known amino acid.
+ * If the matching amino acid is in the local cell, attach with rate
+ * aminoAcidAttach. Catalyzed by aminoacyl_transferase ribozyme in same cell.
+ */
+export function attachAminoAcids(world, rates) {
+  if (rates.aminoAcidAttach < 0.005) return;
+  const W = world.width;
+  const fields = world.fields;
+
+  // Index aminoacyl catalysts by cell for boost lookup
+  const catGrid = _ribozymeGridByType(world, 'aminoacyl_transferase');
+
+  for (const st of world.structures) {
+    if (st.type !== 'rna') continue;
+    if (st.sequence.length < 3) continue;
+    const codons = findFreeCodons(st);
+    if (codons.length === 0) continue;
+
+    const cellIdx = st.position.y * W + st.position.x;
+    const catBoost = catGrid[cellIdx] || 0;
+    const baseProb = rates.aminoAcidAttach * (1 + 5 * catBoost);
+
+    for (const { index, aa } of codons) {
+      const aaIdx = SPECIES_INDEX[aa];
+      if (fields[aaIdx][cellIdx] < 0.05) continue;
+      if (world._rand() >= baseProb) continue;
+      // Attach
+      fields[aaIdx][cellIdx] = Math.max(0, fields[aaIdx][cellIdx] - 0.04);
+      st.attachedAminoAcids.push({ index, aminoAcid: aa });
+    }
+  }
+}
+
+/**
+ * Phase 3 step 15: Peptide bond formation (R8).
+ *
+ * When two amino acids are attached at adjacent codon positions on the
+ * same RNA chain, they form a peptide bond. The new peptide detaches
+ * from the template. Strongly catalyzed by peptidyl_transferase ribozyme
+ * in same cell.
+ */
+export function formPeptideBonds(world, rates) {
+  if (rates.peptideBond < 0.001 && rates.peptideBondCatalyzed < 0.001) return 0;
+  const W = world.width;
+  const catGrid = _ribozymeGridByType(world, 'peptidyl_transferase');
+
+  let formed = 0;
+  for (const st of world.structures) {
+    if (st.type !== 'rna') continue;
+    const aas = st.attachedAminoAcids;
+    if (aas.length < 2) continue;
+    // Sort by index ascending
+    aas.sort((a, b) => a.index - b.index);
+
+    const cellIdx = st.position.y * W + st.position.x;
+    const catBoost = catGrid[cellIdx] || 0;
+    const prob = catBoost > 0
+      ? rates.peptideBondCatalyzed * (1 + 5 * catBoost)
+      : rates.peptideBond;
+
+    // Walk adjacent codon positions (i, i+3)
+    let i = 0;
+    while (i < aas.length - 1) {
+      const a1 = aas[i];
+      const a2 = aas[i + 1];
+      if (a2.index === a1.index + 3) {
+        if (world._rand() < prob) {
+          // Form a peptide chain from this pair (extend Phase: continue chain
+          // if a peptide is already growing on the same RNA — for simplicity,
+          // we always create a new dipeptide here).
+          const peptide = {
+            type: 'peptide',
+            id: _nextPeptideId++,
+            sequence: [a1.aminoAcid, a2.aminoAcid],
+            position: { x: st.position.x, y: st.position.y },
+            parentRNA: st.id,
+            surfaceBound: st.surfaceBound,
+            age: 0,
+          };
+          world.structures.push(peptide);
+          // Remove these two AAs from the RNA (they've left as a peptide)
+          aas.splice(i, 2);
+          formed++;
+          continue;  // don't increment i, since we removed elements
+        }
+      }
+      i++;
+    }
+  }
+  return formed;
+}
+
+let _nextPeptideId = 100000;  // simple separate counter for peptide ids
+
+// Build an (H*W)-length array of catalytic strength of a given ribozyme type
+// summed over all chains in each cell. Used for catalyst lookup.
+function _ribozymeGridByType(world, type) {
+  const W = world.width;
+  const grid = new Float32Array(world.size);
+  for (const st of world.structures) {
+    if (st.type !== 'rna') continue;
+    const cf = st.catalyticFunction;
+    if (!cf || cf.type !== type) continue;
+    const k = st.position.y * W + st.position.x;
+    grid[k] += cf.strength;
+  }
+  return grid;
 }
 
 /**
