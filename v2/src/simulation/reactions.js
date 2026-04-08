@@ -316,8 +316,13 @@ export function nucleateLipids(world, rates) {
  * Phase 4 step 18+19: Lipid self-assembly + vesicle formation.
  *
  * Each tick, scan unmembraned lipids. For each cluster of ≥8 lipids
- * within a small radius, form a Membrane object centered on their
- * centroid. Mark each lipid's membraneId.
+ * within a small radius, form a Membrane object.
+ *
+ * IMPORTANT: when a cluster qualifies, the vesicle's center is biased
+ * toward nearby ribozymes/chains. Real protocell formation isn't random
+ * — lipid bilayers preferentially wrap around hydrophilic molecules.
+ * This bias massively increases the chance that a vesicle encloses
+ * existing ribozymes, which is the prerequisite for protocell emergence.
  */
 export function assembleMembranes(world) {
   const lipids = world.structures.filter(
@@ -326,7 +331,18 @@ export function assembleMembranes(world) {
   if (lipids.length < 8) return 0;
   const W = world.width;
   const H = world.height;
-  // Cluster scan: pick a random unprocessed lipid as seed, gather neighbors
+
+  // Pre-collect chain centroid weighted by length (longer = more anchor weight)
+  const anchors = [];
+  for (const s of world.structures) {
+    if (s.type !== 'rna') continue;
+    anchors.push({
+      x: s.position.x,
+      y: s.position.y,
+      weight: s.catalyticFunction ? 5 : Math.max(1, s.sequence.length / 4),
+    });
+  }
+
   const used = new Set();
   let formed = 0;
   for (const seed of lipids) {
@@ -334,7 +350,7 @@ export function assembleMembranes(world) {
     const cluster = [seed];
     let cx = seed.position.x;
     let cy = seed.position.y;
-    const radiusSq = 4 * 4;  // 4-cell gathering radius
+    const radiusSq = 6 * 6;  // 6-cell gathering radius (was 4)
     for (const other of lipids) {
       if (other === seed || used.has(other.id)) continue;
       let dx = Math.abs(other.position.x - cx);
@@ -348,7 +364,25 @@ export function assembleMembranes(world) {
       }
     }
     if (cluster.length >= 8) {
-      const m = makeMembrane(cx, cy, cluster.map((c) => c.id));
+      // Bias center toward nearby chain anchors (within 12 cells)
+      let biasX = cx;
+      let biasY = cy;
+      let totalW = 1.0;
+      for (const a of anchors) {
+        let dx = Math.abs(a.x - cx);
+        let dy = Math.abs(a.y - cy);
+        if (dx > W / 2) dx = W - dx;
+        if (dy > H / 2) dy = H - dy;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > 144) continue;  // 12-cell radius
+        biasX += a.x * a.weight;
+        biasY += a.y * a.weight;
+        totalW += a.weight;
+      }
+      const finalX = biasX / totalW;
+      const finalY = biasY / totalW;
+
+      const m = makeMembrane(finalX, finalY, cluster.map((c) => c.id));
       world.structures.push(m);
       for (const c of cluster) {
         c.membraneId = m.id;
