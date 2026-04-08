@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Mac
+.DS_Store
+
+# Temporary / logs
+*.log
+/tmp/
+.~lock.*
+
+# Smoke / experimental model checkpoints (keep the real trained ones)
+models/*_smoke.zip
+
+# IDE
+.vscode/
+.idea/
+*.swp
