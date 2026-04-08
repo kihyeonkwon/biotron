@@ -32,58 +32,53 @@ const NUCLEOTIDE_THRESHOLD = 0.15;  // local concentration above which polymeriz
 export function polymerizeRNA(world, rates) {
   const { width: W, height: H, fields, structures } = world;
   const formProb = rates.backboneFormSurface;
-  if (formProb < 0.01) return 0;  // no polymerization in cold/wet conditions
+  if (formProb < 0.01) return 0;
 
-  // Build a per-cell index of existing chains (cheap; chain count is small)
-  const chainsByCell = new Map();
-  for (const st of structures) {
-    if (st.type !== 'rna') continue;
-    const k = st.position.y * W + st.position.x;
-    if (!chainsByCell.has(k)) chainsByCell.set(k, []);
-    chainsByCell.get(k).push(st);
+  let formed = 0;
+
+  // ─── Extension pass: every existing chain gets a chance every tick ───
+  // (This is the fix — previously chains only extended if their cell happened
+  // to be one of 200 randomly sampled. With 85 chains in 40k cells that's
+  // ~0.4 attempts/tick total → max length never grew past trimers.)
+  for (const chain of structures) {
+    if (chain.type !== 'rna') continue;
+    if (chain.sequence.length >= 64) continue;  // hard cap
+    // H-bonded chains preferentially get extended via the templated path,
+    // not the random one — skip them here.
+    if (chain.hBondedTo != null) continue;
+    const ext = formProb * (chain.surfaceBound ? 1.0 : 0.4);
+    if (world._rand() >= ext) continue;
+    const k = chain.position.y * W + chain.position.x;
+    const totN =
+      fields[A_IDX][k] + fields[U_IDX][k] +
+      fields[G_IDX][k] + fields[C_IDX][k];
+    if (totN < NUCLEOTIDE_THRESHOLD * 0.5) continue;
+    const nuc = _pickNucleotide(world, k, fields);
+    if (nuc) {
+      chain.sequence.push(nuc);
+      formed++;
+    }
   }
 
-  // Sample fraction of cells per tick (constant work per tick)
-  const N_SAMPLES = 200;
-  let formed = 0;
+  // ─── Spontaneous dimer formation: random cell sampling ───
+  // Empty cells with high local nucleotide concentration occasionally
+  // nucleate a fresh 2-mer. Cap at a fraction of grid per tick.
+  const N_SAMPLES = 120;
   for (let s = 0; s < N_SAMPLES; s++) {
     const x = Math.floor(world._rand() * W);
     const y = Math.floor(world._rand() * H);
     const k = y * W + x;
-
-    // Local nucleotide concentration sum
-    const cA = fields[A_IDX][k];
-    const cU = fields[U_IDX][k];
-    const cG = fields[G_IDX][k];
-    const cC = fields[C_IDX][k];
-    const totN = cA + cU + cG + cC;
+    const totN =
+      fields[A_IDX][k] + fields[U_IDX][k] +
+      fields[G_IDX][k] + fields[C_IDX][k];
     if (totN < NUCLEOTIDE_THRESHOLD) continue;
-
-    // Existing chain(s) in this cell?
-    const cellChains = chainsByCell.get(k);
-    if (cellChains && cellChains.length > 0) {
-      // Try to extend the first one
-      const chain = cellChains[0];
-      const ext = formProb * (chain.surfaceBound ? 1.0 : 0.4);
-      if (world._rand() < ext) {
-        const nuc = _pickNucleotide(world, k, fields);
-        if (nuc) {
-          chain.sequence.push(nuc);
-          formed++;
-        }
-      }
-    } else {
-      // Spontaneous dimer formation
-      if (world._rand() < formProb * 0.4) {
-        const n1 = _pickNucleotide(world, k, fields);
-        if (!n1) continue;
-        const n2 = _pickNucleotide(world, k, fields);
-        if (!n2) continue;
-        const chain = makeRNA([n1, n2], x, y, true);
-        structures.push(chain);
-        formed++;
-      }
-    }
+    if (world._rand() >= formProb * 0.25) continue;
+    const n1 = _pickNucleotide(world, k, fields);
+    if (!n1) continue;
+    const n2 = _pickNucleotide(world, k, fields);
+    if (!n2) continue;
+    structures.push(makeRNA([n1, n2], x, y, true));
+    formed++;
   }
   return formed;
 }
