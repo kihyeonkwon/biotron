@@ -15,6 +15,7 @@ import {
   degradeAndSupply,
 } from './reactions.js';
 import { resetRNAIds } from './rna.js';
+import { createMilestoneTracker } from './metrics.js';
 
 export class World {
   constructor({ width = 200, height = 200, seed = 1 } = {}) {
@@ -35,6 +36,9 @@ export class World {
 
     // Structures (RNA chains, peptides, lipids, membranes) live here in later phases.
     this.structures = [];
+
+    // Milestone tracker (Phase 2 step 12)
+    this.milestones = createMilestoneTracker();
 
     // Seeded RNG (mulberry32) for reproducible runs
     this._seed = seed >>> 0;
@@ -136,6 +140,9 @@ export class World {
     if (this.structures.length > 0) {
       this._processAdsorption(rates);
     }
+
+    // Phase 2 step 12: milestone observation (cheap, runs every tick)
+    this.milestones.update(this);
   }
 
   _evaporativeConcentration(dryFactor) {
@@ -249,6 +256,7 @@ export class World {
       maxRnaLen: maxLen,
       lenHisto,
       hBondedChains: hBondedCount,
+      milestoneStatus: this.milestones.getStatus(),
     };
   }
 }

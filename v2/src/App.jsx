@@ -212,10 +212,24 @@ export default function App() {
         </div>
 
         <div className="section">
+          <div className="section-title">milestones</div>
+          {(stats.milestoneStatus ?? []).map((m) => (
+            <div className="row" key={m.id} title={m.description}>
+              <span className="label">
+                {m.tickReached != null ? '✓' : '·'} M{m.id} {m.name}
+              </span>
+              <span className="value">
+                {m.tickReached != null ? `t${m.tickReached.toLocaleString()}` : '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div className="section">
           <div className="section-title">phase</div>
           <div className="row">
             <span className="label">build status</span>
-            <span className="value">phase 1 / step 7</span>
+            <span className="value">phase 2 / step 12</span>
           </div>
           <div className="row">
             <span className="label">grid</span>
