@@ -7,7 +7,7 @@
 // are added in subsequent steps.
 
 import { N_SPECIES, SPECIES, SPECIES_INDEX, INITIAL_CONCENTRATION } from './constants.js';
-import { getTemperature, getWaterLevel } from './environment.js';
+import { getTemperature, getWaterLevel, getReactionRates } from './environment.js';
 
 export class World {
   constructor({ width = 200, height = 200, seed = 1 } = {}) {
@@ -18,8 +18,11 @@ export class World {
 
     // One Float32Array per species. fields[i] is the concentration grid for SPECIES[i].
     this.fields = new Array(N_SPECIES);
+    // Double-buffer used by the diffusion step (avoids per-tick allocation).
+    this._next = new Array(N_SPECIES);
     for (let i = 0; i < N_SPECIES; i++) {
       this.fields[i] = new Float32Array(this.size);
+      this._next[i] = new Float32Array(this.size);
     }
 
     // Structures (RNA chains, peptides, lipids, membranes) live here in later phases.
@@ -32,12 +35,44 @@ export class World {
   }
 
   _initialFill() {
-    // Phase 1: a uniform random scatter of monomers across the surface so we
-    // can see something on screen even before diffusion is wired in.
+    // Phase 1: low uniform random base + a few high-concentration "drops" of
+    // each nucleotide. The drops let you visually see the diffusion step
+    // smear them out into smooth gradients over the first few hundred ticks.
     for (let i = 0; i < N_SPECIES; i++) {
       const f = this.fields[i];
       for (let k = 0; k < this.size; k++) {
-        f[k] = INITIAL_CONCENTRATION * this._rand();
+        f[k] = 0.3 * INITIAL_CONCENTRATION * this._rand();
+      }
+    }
+
+    // Drop one bright blob of each nucleotide (A, U, G, C) at four corners
+    // of the grid so diffusion is immediately visible.
+    const blobs = [
+      ['A', this.width * 0.25, this.height * 0.25],
+      ['U', this.width * 0.75, this.height * 0.25],
+      ['G', this.width * 0.25, this.height * 0.75],
+      ['C', this.width * 0.75, this.height * 0.75],
+    ];
+    for (const [name, cx, cy] of blobs) {
+      this._addBlob(name, cx, cy, this.width * 0.05, 1.5);
+    }
+  }
+
+  _addBlob(speciesName, cx, cy, radius, peak) {
+    const idx = SPECIES_INDEX[speciesName];
+    const f = this.fields[idx];
+    const r2 = radius * radius;
+    const ix = Math.floor(cx);
+    const iy = Math.floor(cy);
+    const r = Math.ceil(radius);
+    for (let dy = -r; dy <= r; dy++) {
+      const y = (iy + dy + this.height) % this.height;
+      for (let dx = -r; dx <= r; dx++) {
+        const x = (ix + dx + this.width) % this.width;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > r2) continue;
+        const fall = 1 - d2 / r2;
+        f[y * this.width + x] += peak * fall * fall;
       }
     }
   }
@@ -52,8 +87,49 @@ export class World {
 
   tick() {
     this.tickCount++;
-    // Phase 1 step 1: tick is a no-op (concentrations exist but don't move).
-    // Diffusion arrives in step 2; environment cycles in step 3.
+    const temperature = getTemperature(this.tickCount);
+    const waterLevel = getWaterLevel(this.tickCount);
+    const rates = getReactionRates(temperature, waterLevel);
+
+    // Phase 1 step 2: diffusion. Apply discrete Laplacian to each species.
+    // Toroidal wrap so the grid has no edges (Phase 1 is uniform soup).
+    // No diffusion when fully dry (water level < -0.8).
+    if (waterLevel >= -0.8) {
+      this._diffuse(rates.diffusion);
+    }
+  }
+
+  _diffuse(D) {
+    // Stability constraint: alpha must be ≤ 0.25 for stable explicit Laplacian
+    const alpha = Math.min(0.24, D * 0.25);
+    const W = this.width;
+    const H = this.height;
+
+    for (let s = 0; s < N_SPECIES; s++) {
+      const cur = this.fields[s];
+      const nxt = this._next[s];
+
+      for (let y = 0; y < H; y++) {
+        const yUp = (y - 1 + H) % H;
+        const yDn = (y + 1) % H;
+        for (let x = 0; x < W; x++) {
+          const xLf = (x - 1 + W) % W;
+          const xRt = (x + 1) % W;
+          const i = y * W + x;
+          const c = cur[i];
+          const lap =
+            cur[yUp * W + x] +
+            cur[yDn * W + x] +
+            cur[y * W + xLf] +
+            cur[y * W + xRt] -
+            4 * c;
+          nxt[i] = c + alpha * lap;
+        }
+      }
+      // swap
+      this.fields[s] = nxt;
+      this._next[s] = cur;
+    }
   }
 
   // ─── helpers ───
