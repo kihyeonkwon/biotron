@@ -100,8 +100,40 @@ export function renderWorld(canvas, world, cellPx) {
     ctx.fillRect(0, 0, cw, ch);
   }
 
+  // Phase 1 step 6: draw H-bond connections (dotted lines between paired strands).
+  // Drawn FIRST so chain dots overlap them.
+  drawHBonds(ctx, world, cellPx);
+
   // Phase 1 step 5: draw RNA chains as dots over the field.
   drawRnaChains(ctx, world, cellPx);
+}
+
+function drawHBonds(ctx, world, cellPx) {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(150, 220, 255, 0.55)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 2]);
+  const drawn = new Set();
+  for (const a of world.structures) {
+    if (a.type !== 'rna' || a.hBondedTo == null) continue;
+    if (drawn.has(a.id)) continue;
+    let b = null;
+    for (const s of world.structures) {
+      if (s.id === a.hBondedTo) { b = s; break; }
+    }
+    if (!b) continue;
+    drawn.add(a.id);
+    drawn.add(b.id);
+    const ax = a.position.x * cellPx + cellPx / 2;
+    const ay = a.position.y * cellPx + cellPx / 2;
+    const bx = b.position.x * cellPx + cellPx / 2;
+    const by = b.position.y * cellPx + cellPx / 2;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function drawRnaChains(ctx, world, cellPx) {

@@ -8,7 +8,7 @@
 
 import { N_SPECIES, SPECIES, SPECIES_INDEX, INITIAL_CONCENTRATION } from './constants.js';
 import { getTemperature, getWaterLevel, getReactionRates } from './environment.js';
-import { polymerizeRNA } from './reactions.js';
+import { polymerizeRNA, processHydrogenBonds } from './reactions.js';
 import { resetRNAIds } from './rna.js';
 
 export class World {
@@ -113,6 +113,11 @@ export class World {
 
     // Phase 1 step 5: non-templated RNA polymerization (R4)
     polymerizeRNA(this, rates);
+
+    // Phase 1 step 6: hydrogen bonding between complementary strands (R3)
+    if (this.structures.length > 1) {
+      processHydrogenBonds(this, rates);
+    }
 
     // Phase 1 step 4: structure adsorption / desorption
     if (this.structures.length > 0) {
@@ -219,6 +224,7 @@ export class World {
       lenHisto[L] = (lenHisto[L] || 0) + 1;
     }
     const maxLen = rnaChains.reduce((m, ch) => Math.max(m, ch.sequence.length), 0);
+    const hBondedCount = rnaChains.filter((c) => c.hBondedTo != null).length;
 
     return {
       tick: this.tickCount,
@@ -229,6 +235,7 @@ export class World {
       rnaChains: rnaChains.length,
       maxRnaLen: maxLen,
       lenHisto,
+      hBondedChains: hBondedCount,
     };
   }
 }

@@ -150,6 +150,10 @@ export default function App() {
             <span className="label">max length</span>
             <span className="value">{stats.maxRnaLen ?? 0}</span>
           </div>
+          <div className="row">
+            <span className="label">H-bonded</span>
+            <span className="value">{stats.hBondedChains ?? 0}</span>
+          </div>
         </div>
 
         <div className="section">

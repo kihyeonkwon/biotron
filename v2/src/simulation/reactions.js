@@ -84,6 +84,110 @@ export function polymerizeRNA(world, rates) {
   return formed;
 }
 
+/**
+ * Phase 1 step 6: Hydrogen bonding between complementary RNA strands (R3).
+ *
+ * For each cell with ≥2 unbonded chains, attempt antiparallel pairing.
+ * Pair score = number of complementary positions when one strand is reversed.
+ * Pairs form with probability rates.hBondForm * (1 + score/L).
+ * Existing pairs break each tick with probability hBondBreakAU (weighted down
+ * by GC content of the pairing — GC bonds are ~2x stronger).
+ */
+export function processHydrogenBonds(world, rates) {
+  const W = world.width;
+  const structures = world.structures;
+
+  // ─── Step 1: break existing pairs ───
+  // We walk pairs once. The lower-id chain in a pair owns the break decision
+  // (so we don't double-roll).
+  const pairBreakBaseAU = rates.hBondBreakAU;
+  const pairBreakBaseGC = rates.hBondBreakGC;
+  if (pairBreakBaseAU > 0.05 || pairBreakBaseGC > 0.05) {
+    for (const a of structures) {
+      if (a.type !== 'rna' || a.hBondedTo == null) continue;
+      const b = _findById(structures, a.hBondedTo);
+      if (!b || b.id < a.id) continue;
+      // Pair score and GC fraction
+      const { score, gcFrac } = _pairScore(a, b);
+      // Effective break rate: weighted average of AU and GC break rates
+      const breakRate = pairBreakBaseAU * (1 - gcFrac) + pairBreakBaseGC * gcFrac;
+      // Stability inversely proportional to score
+      const effective = breakRate / Math.max(1, score * 0.5);
+      if (world._rand() < effective) {
+        a.hBondedTo = null;
+        b.hBondedTo = null;
+      }
+    }
+  }
+
+  // ─── Step 2: form new pairs ───
+  if (rates.hBondForm < 0.05) return;
+  // Index chains by cell
+  const cellMap = new Map();
+  for (const st of structures) {
+    if (st.type !== 'rna') continue;
+    if (st.hBondedTo != null) continue;
+    const k = st.position.y * W + st.position.x;
+    if (!cellMap.has(k)) cellMap.set(k, []);
+    cellMap.get(k).push(st);
+  }
+  for (const list of cellMap.values()) {
+    if (list.length < 2) continue;
+    for (let i = 0; i < list.length - 1; i++) {
+      const a = list[i];
+      if (a.hBondedTo != null) continue;
+      for (let j = i + 1; j < list.length; j++) {
+        const b = list[j];
+        if (b.hBondedTo != null) continue;
+        if (a.sequence.length < 2 || b.sequence.length < 2) continue;
+        const { score } = _pairScore(a, b);
+        if (score === 0) continue;
+        const minL = Math.min(a.sequence.length, b.sequence.length);
+        const matchFrac = score / minL;
+        // Probability scales with rates.hBondForm and match fraction
+        if (matchFrac < 0.4) continue;  // need ≥40% complementary to nucleate
+        if (world._rand() < rates.hBondForm * matchFrac) {
+          a.hBondedTo = b.id;
+          b.hBondedTo = a.id;
+          break;
+        }
+      }
+    }
+  }
+}
+
+// Score the antiparallel pairing of two chains. Returns {score, gcFrac}.
+// Aligns end-to-end (longer chain may "overhang" — only matching length scored).
+function _pairScore(a, b) {
+  const sa = a.sequence;
+  const sb = b.sequence;
+  const minL = Math.min(sa.length, sb.length);
+  let score = 0;
+  let gcMatches = 0;
+  for (let i = 0; i < minL; i++) {
+    const x = sa[i];
+    const y = sb[sb.length - 1 - i];  // antiparallel: read b in reverse
+    if (
+      (x === 'A' && y === 'U') ||
+      (x === 'U' && y === 'A')
+    ) {
+      score++;
+    } else if (
+      (x === 'G' && y === 'C') ||
+      (x === 'C' && y === 'G')
+    ) {
+      score++;
+      gcMatches++;
+    }
+  }
+  return { score, gcFrac: score === 0 ? 0 : gcMatches / score };
+}
+
+function _findById(structures, id) {
+  for (const s of structures) if (s.id === id) return s;
+  return null;
+}
+
 // Sample one nucleotide from a cell weighted by its concentration; consume it.
 function _pickNucleotide(world, k, fields) {
   const cA = fields[A_IDX][k];
