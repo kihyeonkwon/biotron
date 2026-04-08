@@ -121,7 +121,10 @@ export function processHydrogenBonds(world, rates) {
 
   // ─── Step 2: form new pairs ───
   if (rates.hBondForm < 0.05) return;
-  // Index chains by cell
+  // Index chains by cell, then look at the cell + its 8 neighbors when
+  // searching for potential partners (real chains in solution can collide
+  // even when not in exactly the same cell).
+  const H = world.height;
   const cellMap = new Map();
   for (const st of structures) {
     if (st.type !== 'rna') continue;
@@ -130,27 +133,41 @@ export function processHydrogenBonds(world, rates) {
     if (!cellMap.has(k)) cellMap.set(k, []);
     cellMap.get(k).push(st);
   }
-  for (const list of cellMap.values()) {
-    if (list.length < 2) continue;
-    for (let i = 0; i < list.length - 1; i++) {
-      const a = list[i];
-      if (a.hBondedTo != null) continue;
-      for (let j = i + 1; j < list.length; j++) {
-        const b = list[j];
-        if (b.hBondedTo != null) continue;
-        if (a.sequence.length < 2 || b.sequence.length < 2) continue;
-        const { score } = _pairScore(a, b);
-        if (score === 0) continue;
-        const minL = Math.min(a.sequence.length, b.sequence.length);
-        const matchFrac = score / minL;
-        // Probability scales with rates.hBondForm and match fraction
-        if (matchFrac < 0.4) continue;  // need ≥40% complementary to nucleate
-        if (world._rand() < rates.hBondForm * matchFrac) {
-          a.hBondedTo = b.id;
-          b.hBondedTo = a.id;
-          break;
+  // For each unbonded chain, scan its cell + 8 neighbors for partners
+  for (const a of structures) {
+    if (a.type !== 'rna' || a.hBondedTo != null) continue;
+    if (a.sequence.length < 2) continue;
+    const ax = a.position.x;
+    const ay = a.position.y;
+    let bestB = null;
+    let bestProb = 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      const ny = (ay + dy + H) % H;
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = (ax + dx + W) % W;
+        const list = cellMap.get(ny * W + nx);
+        if (!list) continue;
+        for (const b of list) {
+          if (b === a || b.hBondedTo != null) continue;
+          if (b.sequence.length < 2) continue;
+          const { score } = _pairScore(a, b);
+          if (score === 0) continue;
+          const minL = Math.min(a.sequence.length, b.sequence.length);
+          const matchFrac = score / minL;
+          if (matchFrac < 0.35) continue;  // ≥35% complementary
+          // Distance penalty for neighbor cells
+          const distPenalty = (dx === 0 && dy === 0) ? 1.0 : 0.5;
+          const prob = rates.hBondForm * matchFrac * distPenalty;
+          if (prob > bestProb) {
+            bestProb = prob;
+            bestB = b;
+          }
         }
       }
+    }
+    if (bestB && world._rand() < bestProb) {
+      a.hBondedTo = bestB.id;
+      bestB.hBondedTo = a.id;
     }
   }
 }

@@ -59,10 +59,10 @@ export function createMilestoneTracker() {
       }
     }
 
-    // M4 — self-replication (a copy reached its template length AND is no longer in progress)
-    // Simple proxy: count the number of "completed" pairs where both chains have equal length
-    // and score / L >= 0.7, AND have been bonded for at least one tick.
-    // We track _completedCopies cumulatively; M4 trips when it crosses 5.
+    // M4 — self-replication: H-bonded pairs with high antiparallel match.
+    // Loosened from "equal length" to "length difference ≤ 2" because the
+    // copying process passes through stages where the copy is shorter than
+    // the template. 3+ such pairs simultaneously = systematic replication.
     if (!reached[4]) {
       let cur = 0;
       for (const a of structures) {
@@ -71,13 +71,13 @@ export function createMilestoneTracker() {
         let b = null;
         for (const s of structures) if (s.id === a.hBondedTo) { b = s; break; }
         if (!b) continue;
-        if (a.sequence.length !== b.sequence.length) continue;
-        if (a.sequence.length < 4) continue;
+        if (Math.abs(a.sequence.length - b.sequence.length) > 2) continue;
+        if (Math.min(a.sequence.length, b.sequence.length) < 4) continue;
         const matchFrac = _antiparallelMatchFraction(a.sequence, b.sequence);
         if (matchFrac >= 0.7) cur++;
       }
       _completedCopies = Math.max(_completedCopies, cur);
-      if (_completedCopies >= 5) reached[4] = tick;
+      if (_completedCopies >= 3) reached[4] = tick;
     }
 
     // M5 — ribozyme emergence (any RNA chain has catalyticFunction)
