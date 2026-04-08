@@ -99,4 +99,42 @@ export function renderWorld(canvas, world, cellPx) {
     ctx.fillStyle = `rgba(190, 130, 70, ${dry * 0.07})`;
     ctx.fillRect(0, 0, cw, ch);
   }
+
+  // Phase 1 step 5: draw RNA chains as dots over the field.
+  drawRnaChains(ctx, world, cellPx);
+}
+
+function drawRnaChains(ctx, world, cellPx) {
+  for (const st of world.structures) {
+    if (st.type !== 'rna') continue;
+    const L = st.sequence.length;
+    const px = st.position.x * cellPx;
+    const py = st.position.y * cellPx;
+
+    // Color: shift from cyan (high AU) to magenta (high GC) based on composition
+    let gc = 0;
+    for (const b of st.sequence) if (b === 'G' || b === 'C') gc++;
+    const gcRatio = gc / L;
+    const r = Math.floor(120 + 120 * gcRatio);
+    const g = Math.floor(220 - 100 * gcRatio);
+    const b = Math.floor(220);
+
+    // Size grows with chain length: 2-mer ≈ cellPx; longer ≈ cellPx * (1 + log)
+    const size = Math.max(cellPx, Math.min(cellPx * 4, cellPx * (1 + Math.log2(L))));
+    const off = (size - cellPx) / 2;
+
+    // Halo for surface-bound (slightly brighter)
+    if (st.surfaceBound) {
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.95)`;
+    } else {
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.70)`;
+    }
+    ctx.fillRect(px - off, py - off, size, size);
+
+    // For long chains, add a white core
+    if (L >= 6) {
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.fillRect(px + cellPx * 0.25, py + cellPx * 0.25, cellPx * 0.5, cellPx * 0.5);
+    }
+  }
 }

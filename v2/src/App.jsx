@@ -141,10 +141,22 @@ export default function App() {
         </div>
 
         <div className="section">
+          <div className="section-title">structures</div>
+          <div className="row">
+            <span className="label">RNA chains</span>
+            <span className="value">{stats.rnaChains ?? 0}</span>
+          </div>
+          <div className="row">
+            <span className="label">max length</span>
+            <span className="value">{stats.maxRnaLen ?? 0}</span>
+          </div>
+        </div>
+
+        <div className="section">
           <div className="section-title">phase</div>
           <div className="row">
             <span className="label">build status</span>
-            <span className="value">phase 1 / step 1</span>
+            <span className="value">phase 1 / step 5</span>
           </div>
           <div className="row">
             <span className="label">grid</span>

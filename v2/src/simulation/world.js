@@ -8,9 +8,12 @@
 
 import { N_SPECIES, SPECIES, SPECIES_INDEX, INITIAL_CONCENTRATION } from './constants.js';
 import { getTemperature, getWaterLevel, getReactionRates } from './environment.js';
+import { polymerizeRNA } from './reactions.js';
+import { resetRNAIds } from './rna.js';
 
 export class World {
   constructor({ width = 200, height = 200, seed = 1 } = {}) {
+    resetRNAIds();
     this.width = width;
     this.height = height;
     this.size = width * height;
@@ -108,8 +111,10 @@ export class World {
       this._evaporativeConcentration(-waterLevel);
     }
 
-    // Phase 1 step 4: structure adsorption / desorption framework.
-    // (No structures exist until Phase 1 step 5; this is the dispatcher only.)
+    // Phase 1 step 5: non-templated RNA polymerization (R4)
+    polymerizeRNA(this, rates);
+
+    // Phase 1 step 4: structure adsorption / desorption
     if (this.structures.length > 0) {
       this._processAdsorption(rates);
     }
@@ -206,12 +211,24 @@ export class World {
       concentrations[SPECIES[i]] = sum / this.size;
     }
 
+    // Chain length histogram (Phase 1 step 5+)
+    const rnaChains = this.structures.filter((s) => s.type === 'rna');
+    const lenHisto = {};
+    for (const ch of rnaChains) {
+      const L = ch.sequence.length;
+      lenHisto[L] = (lenHisto[L] || 0) + 1;
+    }
+    const maxLen = rnaChains.reduce((m, ch) => Math.max(m, ch.sequence.length), 0);
+
     return {
       tick: this.tickCount,
       temperature,
       waterLevel,
       concentrations,
       structures: this.structures.length,
+      rnaChains: rnaChains.length,
+      maxRnaLen: maxLen,
+      lenHisto,
     };
   }
 }
