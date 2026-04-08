@@ -369,12 +369,23 @@ Degradation:
   - Free monomers (in concentration field): reduce by degradation rate
   - Unbound short chains (length < 3): degrade with probability 0.01
   - Bound/long chains: protected (probability 0.0001)
+  - For RNA chains: hydrolysis probability is also reduced by self-complementarity:
+      effective = base * (1 - 0.5 * selfComp(sequence))
+    Better-folded RNAs survive longer. selfComp is the normalized count of
+    intramolecular complementary base pairs at distance ≥ 3 (hairpin-able).
 
 Supply (ocean input):
   - At grid edges, when waterLevel > 0.5 (high tide):
   - Add random nucleotides, amino acids, phosphate, fatty acids
   - Rate = monomerSupply
   - Simulates tidal delivery of raw materials
+
+Volcanic / energy spikes (rare):
+  - With small probability per tick (~1/1000), trigger a brief "energy event"
+  - Local temperature spike + monomer concentration spike in a small region
+  - Models volcanic vents, lightning, meteor impacts
+  - Effect: backboneForm bursts (dehydration condensation gets a kick)
+  - Each event lasts a few ticks
 ```
 
 ### R7: Codon-Amino Acid Affinity [ENCODED RULE]
@@ -431,24 +442,30 @@ Ribozyme types:
   Length >= 15 AND contains "GGCGCC":
     → peptidyl_transferase
     → Catalyzes peptide bond formation (R8) in same cell
-    → strength = GC_ratio of full sequence
 
   Length >= 15 AND contains "CCCUUU":
     → rna_replicase
     → Catalyzes backbone bond formation (R4) in same cell
-    → strength = GC_ratio of full sequence
 
   Length >= 20 AND contains "GGGAAACCC":
     → aminoacyl_transferase
     → Catalyzes amino acid attachment (R7) in same cell
-    → strength = GC_ratio of full sequence
+
+Strength formula (combined fold quality):
+  strength = 0.5 * GC_ratio + 0.5 * selfComplementarity
+
+  - GC_ratio: fraction of G+C bases (more stable backbone)
+  - selfComplementarity: normalized count of intramolecular complementary
+    pairs at distance ≥ 3 (hairpin-able fold density)
+
+  This combo captures BOTH the chemistry (GC bonds) AND the structure
+  (how well the chain can fold into a catalytic shape). Pure GC content
+  alone is too coarse — a randomly-shuffled GC-rich sequence may not
+  fold at all, while a moderate-GC palindrome folds tightly.
 
 Catalytic effect:
   - Multiply the base reaction probability by (1 + 5 * strength)
   - Range: 1x (no catalyst) to ~6x (strong ribozyme)
-
-  Higher GC content = more stable structure = better catalyst
-  This is chemically justified: GC-rich RNA folds more stably
 ```
 
 ### R10: Lipid Self-Assembly
@@ -484,18 +501,34 @@ Tide interaction:
 ```
 When a vesicle (membrane) encloses structures:
 
-  - Internal concentrations are isolated from external
-  - Catalytic effects are concentrated (ribozyme only helps what's inside)
+Membrane is SEMI-PERMEABLE (this is critical — not a complete barrier):
+
+  - Small molecules (concentration field: A, U, G, C, amino acids, P, Mg, FA):
+    → Cross the membrane during diffusion, BUT with attenuation factor (~0.3x)
+    → This lets fresh monomers seep INTO the compartment continuously
+    → Without this, internal replication starves immediately
+    → Models real lipid bilayer permeability for small polar molecules
+
+  - Structures (RNA, peptides, lipids):
+    → Cannot cross. Trapped inside (or outside) the membrane.
+    → This is the source of the "selfish" effect: a ribozyme inside the
+      membrane benefits ONLY the contents of THAT membrane.
+
+Resulting dynamics:
+  - Internal concentrations equilibrate slowly with external (not isolated)
+  - Catalytic effects concentrate on what's inside (ribozymes are trapped)
   - Favorable mutations benefit only the compartment they're in
+  - Internal monomer pool is replenished from outside via diffusion → sustained
+    replication is possible
   - → Natural selection at the protocell level
 
-  - If a vesicle contains:
+Protocell criterion (simulation's ultimate goal):
+  - A vesicle containing:
     - Self-replicating RNA (via rna_replicase ribozyme)
     - Translation machinery (aminoacyl_transferase + peptidyl_transferase)
     - Growing peptides
     - Lipid production (some peptides could catalyze FA synthesis — stretch)
   - → This is a protocell
-  - → The simulation's ultimate goal
 ```
 
 ---
@@ -522,6 +555,12 @@ Milestone 4: Self-replication
 Milestone 5: Ribozyme emergence
   An RNA chain gains catalytic function
   Metric: count of active ribozymes by type
+  Bonus observation: parasitic RNA chains
+    — short non-catalytic chains that get replicated by a nearby replicase
+      ribozyme without contributing themselves. This is the start of ecology
+      (Hogeweg / Boerlijst hypercycle parasites). Track as a separate metric:
+      ratio of (replicated chains in cell) / (catalyst chains in cell).
+      Rising ratio over time = parasites are winning.
 
 Milestone 6: Primitive translation
   Amino acids attach to RNA via codon matching → peptide forms
