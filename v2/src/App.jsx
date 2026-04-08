@@ -59,7 +59,6 @@ function ChainHistogram({ lenHisto }) {
 const GRID_W = 200;
 const GRID_H = 200;
 const CELL_PX = 3;          // canvas cell size
-const TICK_INTERVAL_MS = 16; // ~60 fps
 
 export default function App() {
   const canvasRef = useRef(null);
@@ -68,6 +67,8 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [tick, setTick] = useState(0);
   const [stats, setStats] = useState({});
+  // ticks per animation frame (60fps base) — at 1 = real-time, at 8 = 8x speed
+  const [ticksPerFrame, setTicksPerFrame] = useState(1);
 
   // Initialize world once
   useEffect(() => {
@@ -77,25 +78,21 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Tick loop
+  // Tick loop — uses requestAnimationFrame for smooth pacing
   useEffect(() => {
     if (!running) return;
-    let last = performance.now();
-    const loop = (now) => {
-      if (now - last >= TICK_INTERVAL_MS) {
-        worldRef.current.tick();
-        last = now;
-        if (worldRef.current.tickCount % 4 === 0) {
-          drawNow();
-          setTick(worldRef.current.tickCount);
-          setStats(worldRef.current.getStats());
-        }
-      }
+    const loop = () => {
+      const w = worldRef.current;
+      // Run N ticks per frame based on speed setting
+      for (let i = 0; i < ticksPerFrame; i++) w.tick();
+      drawNow();
+      setTick(w.tickCount);
+      setStats(w.getStats());
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [running]);
+  }, [running, ticksPerFrame]);
 
   function drawNow() {
     const canvas = canvasRef.current;
@@ -152,6 +149,21 @@ export default function App() {
           <div className="row">
             <span className="label">tick</span>
             <span className="value">{tick.toLocaleString()}</span>
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <div className="row">
+              <span className="label">speed (ticks / frame)</span>
+              <span className="value">{ticksPerFrame}×</span>
+            </div>
+            <input
+              type="range"
+              className="slider"
+              min={1}
+              max={32}
+              value={ticksPerFrame}
+              onChange={(e) => setTicksPerFrame(parseInt(e.target.value))}
+              style={{ width: '100%' }}
+            />
           </div>
         </div>
 
