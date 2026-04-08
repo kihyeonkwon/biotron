@@ -333,13 +333,14 @@ export function assembleMembranes(world) {
   const H = world.height;
 
   // Pre-collect chain centroid weighted by length (longer = more anchor weight)
+  // Ribozymes get a much heavier weight so vesicles snap onto ribozyme clusters.
   const anchors = [];
   for (const s of world.structures) {
     if (s.type !== 'rna') continue;
     anchors.push({
       x: s.position.x,
       y: s.position.y,
-      weight: s.catalyticFunction ? 5 : Math.max(1, s.sequence.length / 4),
+      weight: s.catalyticFunction ? 20 : Math.max(1, s.sequence.length / 4),
     });
   }
 
@@ -364,7 +365,7 @@ export function assembleMembranes(world) {
       }
     }
     if (cluster.length >= 8) {
-      // Bias center toward nearby chain anchors (within 12 cells)
+      // Bias center toward nearby chain anchors (within 18 cells now)
       let biasX = cx;
       let biasY = cy;
       let totalW = 1.0;
@@ -374,7 +375,7 @@ export function assembleMembranes(world) {
         if (dx > W / 2) dx = W - dx;
         if (dy > H / 2) dy = H - dy;
         const d2 = dx * dx + dy * dy;
-        if (d2 > 144) continue;  // 12-cell radius
+        if (d2 > 324) continue;  // 18-cell radius (was 12)
         biasX += a.x * a.weight;
         biasY += a.y * a.weight;
         totalW += a.weight;
@@ -623,12 +624,17 @@ export function degradeAndSupply(world, rates) {
       const st = world.structures[i];
       if (st.type !== 'rna') continue;
       const L = st.sequence.length;
-      // Length factor: short → 5x, length 3 → 1x, long → 0.05x
+      // Length factor: smoother curve so length distribution is broader.
+      // Sweet spot 10-30; very long chains are mechanically unstable
+      // (entropy + UV damage cumulatively raises break risk).
       let lenFactor;
       if (L < 3) lenFactor = 5.0;
-      else if (L < 10) lenFactor = 1.0;
-      else if (L < 20) lenFactor = 0.2;
-      else lenFactor = 0.05;
+      else if (L < 6) lenFactor = 2.0;
+      else if (L < 10) lenFactor = 0.8;
+      else if (L < 20) lenFactor = 0.3;
+      else if (L < 35) lenFactor = 0.15;
+      else if (L < 50) lenFactor = 0.4;   // long chains a bit more fragile
+      else lenFactor = 0.8;               // very long chains break under entropy
       // Self-complementarity protection
       const selfComp = selfComplementarity(st);
       const foldFactor = 1 - 0.5 * selfComp;

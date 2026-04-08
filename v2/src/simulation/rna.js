@@ -27,14 +27,14 @@ export const CODON_AA = {
 };
 
 // Ribozyme motifs (R9 — encoded chemistry rule)
-// All motifs are 6 nucleotides so they have comparable spontaneous frequency
-// (~1/4096 per window). Original SPEC had a 9-char aminoacyl_transferase motif
-// which made it 60x rarer than the others — empirically observed never to
-// emerge — so it's been shortened to 6 chars to match.
+// All motifs are 6 nucleotides (~1/4096 per window) and use the same
+// length threshold so all 3 types appear at comparable rates.
+// Length threshold 12 instead of 15-20 to broaden the ribozyme population
+// (was 2.7% of chains, target ~10%).
 export const RIBOZYME_MOTIFS = {
-  peptidyl_transferase:  { motif: 'GGCGCC', minLength: 15 },
-  rna_replicase:         { motif: 'CCCUUU', minLength: 15 },
-  aminoacyl_transferase: { motif: 'GGGAAA', minLength: 18 },
+  peptidyl_transferase:  { motif: 'GGCGCC', minLength: 12 },
+  rna_replicase:         { motif: 'CCCUUU', minLength: 12 },
+  aminoacyl_transferase: { motif: 'GGGAAA', minLength: 12 },
 };
 
 export function isComplementary(a, b) {

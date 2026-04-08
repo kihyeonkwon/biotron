@@ -23,10 +23,10 @@ export function makeLipid(x, y, headAngle = 0) {
 }
 
 export function makeMembrane(centerX, centerY, lipidIds) {
-  // Larger radius formula so the enclosed area is meaningful relative to
-  // the chain/ribozyme density. Scales as sqrt(N) * 3.5 → 8 lipids ≈ 6
-  // cells radius (~110 cells of interior), 40 lipids ≈ 14 cell radius.
-  const radius = Math.max(4, Math.sqrt(lipidIds.length / Math.PI) * 3.5);
+  // Larger radius so each vesicle can capture multiple ribozymes.
+  // 8 lipids → ~8 cell radius (~200 cells interior),
+  // 40 lipids → ~18 cell radius (~1000 cells interior).
+  const radius = Math.max(6, Math.sqrt(lipidIds.length / Math.PI) * 5);
   return {
     type: 'membrane',
     id: _nextMembraneId++,
