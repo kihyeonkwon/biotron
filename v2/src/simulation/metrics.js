@@ -100,7 +100,57 @@ export function createMilestoneTracker() {
       }
     }
 
-    // M7-M9 are Phase 4
+    // M7 — vesicle formation (any membrane exists)
+    if (!reached[7]) {
+      for (const s of structures) {
+        if (s.type === 'membrane') {
+          reached[7] = tick;
+          break;
+        }
+      }
+    }
+
+    // M8 — compartmentalized RNA (a vesicle encloses an RNA chain)
+    if (!reached[8]) {
+      // Need a quick lookup of structure by id
+      const idMap = new Map();
+      for (const s of structures) idMap.set(s.id, s);
+      for (const m of structures) {
+        if (m.type !== 'membrane') continue;
+        for (const eid of m.enclosed) {
+          const en = idMap.get(eid);
+          if (en && en.type === 'rna') {
+            reached[8] = tick;
+            break;
+          }
+        }
+        if (reached[8]) break;
+      }
+    }
+
+    // M9 — PROTOCELL: vesicle containing all 3 ribozyme types
+    if (!reached[9]) {
+      const idMap = new Map();
+      for (const s of structures) idMap.set(s.id, s);
+      for (const m of structures) {
+        if (m.type !== 'membrane') continue;
+        const types = new Set();
+        for (const eid of m.enclosed) {
+          const en = idMap.get(eid);
+          if (en && en.type === 'rna' && en.catalyticFunction) {
+            types.add(en.catalyticFunction.type);
+          }
+        }
+        if (
+          types.has('rna_replicase') &&
+          types.has('peptidyl_transferase') &&
+          types.has('aminoacyl_transferase')
+        ) {
+          reached[9] = tick;
+          break;
+        }
+      }
+    }
   }
 
   function getReached() {

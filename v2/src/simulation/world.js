@@ -16,13 +16,18 @@ import {
   activateRibozymes,
   attachAminoAcids,
   formPeptideBonds,
+  nucleateLipids,
+  assembleMembranes,
+  updateMembranes,
 } from './reactions.js';
 import { resetRNAIds } from './rna.js';
+import { resetLipidIds } from './lipid.js';
 import { createMilestoneTracker } from './metrics.js';
 
 export class World {
   constructor({ width = 200, height = 200, seed = 1 } = {}) {
     resetRNAIds();
+    resetLipidIds();
     this.width = width;
     this.height = height;
     this.size = width * height;
@@ -42,6 +47,9 @@ export class World {
 
     // Milestone tracker (Phase 2 step 12)
     this.milestones = createMilestoneTracker();
+
+    // Phase 4: per-cell membrane id (Int32, -1 = no membrane)
+    this._cellMembrane = new Int32Array(this.size).fill(-1);
 
     // Seeded RNG (mulberry32) for reproducible runs
     this._seed = seed >>> 0;
@@ -70,6 +78,18 @@ export class World {
     ];
     for (const [name, cx, cy] of blobs) {
       this._addBlob(name, cx, cy, this.width * 0.05, 1.5);
+    }
+
+    // Phase 4: scatter some FA blobs so lipids have something to nucleate from.
+    this._addBlob('FA', this.width * 0.5, this.height * 0.3, this.width * 0.06, 1.5);
+    this._addBlob('FA', this.width * 0.3, this.height * 0.7, this.width * 0.06, 1.5);
+    this._addBlob('FA', this.width * 0.7, this.height * 0.7, this.width * 0.06, 1.5);
+
+    // Bonus seed: a few free amino acids so translation has something to chew on.
+    for (const aa of ['Gly', 'Ala', 'Val', 'Asp', 'Glu']) {
+      this._addBlob(aa, this.width * (0.2 + 0.6 * this._rand()),
+                    this.height * (0.2 + 0.6 * this._rand()),
+                    this.width * 0.04, 1.0);
     }
   }
 
@@ -152,6 +172,16 @@ export class World {
       formPeptideBonds(this, rates);
     }
 
+    // Phase 4 steps 17-19: lipid nucleation + membrane self-assembly
+    nucleateLipids(this, rates);
+    if (this.tickCount % 6 === 0) {
+      assembleMembranes(this);
+    }
+
+    // Phase 4 step 20+21: membrane state update (enclosed list, integrity, dissolution)
+    updateMembranes(this, waterLevel);
+    this._rebuildCellMembraneIndex();
+
     // Phase 2 step 11: degradation + ocean supply (R6)
     degradeAndSupply(this, rates);
 
@@ -162,6 +192,31 @@ export class World {
 
     // Phase 2 step 12: milestone observation (cheap, runs every tick)
     this.milestones.update(this);
+  }
+
+  _rebuildCellMembraneIndex() {
+    // Mark each grid cell with its enclosing membrane id (-1 if none).
+    // For overlapping membranes, the smaller one wins (more recent / inner).
+    this._cellMembrane.fill(-1);
+    const W = this.width;
+    const H = this.height;
+    let anyMembrane = false;
+    for (const m of this.structures) {
+      if (m.type !== 'membrane') continue;
+      anyMembrane = true;
+      const r = Math.ceil(m.radius);
+      const r2 = m.radius * m.radius;
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy > r2) continue;
+          const x = ((Math.round(m.center.x) + dx) % W + W) % W;
+          const y = ((Math.round(m.center.y) + dy) % H + H) % H;
+          const k = y * W + x;
+          if (this._cellMembrane[k] === -1) this._cellMembrane[k] = m.id;
+        }
+      }
+    }
+    this._hasMembraneIndex = anyMembrane;
   }
 
   _evaporativeConcentration(dryFactor) {
@@ -198,6 +253,11 @@ export class World {
     const alpha = Math.min(0.24, D * 0.25);
     const W = this.width;
     const H = this.height;
+    const cellMem = this._cellMembrane;
+    const hasMembranes = this._hasMembraneIndex;
+    // Phase 4: monomers crossing a membrane boundary are attenuated by this factor
+    // (small molecules pass through but slowly — semi-permeable lipid bilayer)
+    const SEAL = 0.30;
 
     for (let s = 0; s < N_SPECIES; s++) {
       const cur = this.fields[s];
@@ -211,16 +271,29 @@ export class World {
           const xRt = (x + 1) % W;
           const i = y * W + x;
           const c = cur[i];
-          const lap =
-            cur[yUp * W + x] +
-            cur[yDn * W + x] +
-            cur[y * W + xLf] +
-            cur[y * W + xRt] -
-            4 * c;
-          nxt[i] = c + alpha * lap;
+          if (hasMembranes) {
+            const myM = cellMem[i];
+            const fU = (cellMem[yUp * W + x] === myM) ? 1.0 : SEAL;
+            const fD = (cellMem[yDn * W + x] === myM) ? 1.0 : SEAL;
+            const fL = (cellMem[y * W + xLf] === myM) ? 1.0 : SEAL;
+            const fR = (cellMem[y * W + xRt] === myM) ? 1.0 : SEAL;
+            const lap =
+              fU * (cur[yUp * W + x] - c) +
+              fD * (cur[yDn * W + x] - c) +
+              fL * (cur[y * W + xLf] - c) +
+              fR * (cur[y * W + xRt] - c);
+            nxt[i] = c + alpha * lap;
+          } else {
+            const lap =
+              cur[yUp * W + x] +
+              cur[yDn * W + x] +
+              cur[y * W + xLf] +
+              cur[y * W + xRt] -
+              4 * c;
+            nxt[i] = c + alpha * lap;
+          }
         }
       }
-      // swap
       this.fields[s] = nxt;
       this._next[s] = cur;
     }
@@ -258,6 +331,8 @@ export class World {
     // Chain length histogram (Phase 1 step 5+)
     const rnaChains = this.structures.filter((s) => s.type === 'rna');
     const peptides = this.structures.filter((s) => s.type === 'peptide');
+    const lipids = this.structures.filter((s) => s.type === 'lipid');
+    const membranes = this.structures.filter((s) => s.type === 'membrane');
     const lenHisto = {};
     for (const ch of rnaChains) {
       const L = ch.sequence.length;
@@ -282,6 +357,8 @@ export class World {
       ribozymes: ribozymes.length,
       ribByType,
       peptides: peptides.length,
+      lipids: lipids.length,
+      membranes: membranes.length,
       milestoneStatus: this.milestones.getStatus(),
     };
   }

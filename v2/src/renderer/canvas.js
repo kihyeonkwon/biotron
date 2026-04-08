@@ -100,15 +100,58 @@ export function renderWorld(canvas, world, cellPx) {
     ctx.fillRect(0, 0, cw, ch);
   }
 
+  // Phase 4: vesicle membranes (drawn early so chains/peptides overlay)
+  drawMembranes(ctx, world, cellPx);
+
   // Phase 1 step 6: draw H-bond connections (dotted lines between paired strands).
-  // Drawn FIRST so chain dots overlap them.
   drawHBonds(ctx, world, cellPx);
+
+  // Phase 4: lipid particles
+  drawLipids(ctx, world, cellPx);
 
   // Phase 1 step 5: draw RNA chains as dots over the field.
   drawRnaChains(ctx, world, cellPx);
 
   // Phase 3 step 15: draw peptides as small colored bars above their parent cell.
   drawPeptides(ctx, world, cellPx);
+}
+
+function drawLipids(ctx, world, cellPx) {
+  for (const st of world.structures) {
+    if (st.type !== 'lipid') continue;
+    const px = st.position.x * cellPx + cellPx / 2;
+    const py = st.position.y * cellPx + cellPx / 2;
+    ctx.fillStyle = st.membraneId != null
+      ? 'rgba(255, 200, 130, 0.95)'
+      : 'rgba(220, 180, 100, 0.7)';
+    ctx.fillRect(px - 1, py - 1, 2, 2);
+  }
+}
+
+function drawMembranes(ctx, world, cellPx) {
+  for (const st of world.structures) {
+    if (st.type !== 'membrane') continue;
+    const cx = st.center.x * cellPx;
+    const cy = st.center.y * cellPx;
+    const r = st.radius * cellPx;
+
+    // Interior fill (slightly highlighted to indicate enclosed space)
+    ctx.fillStyle = 'rgba(140, 200, 255, 0.06)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Membrane ring — color depends on protocell-ness
+    // Heuristic: if integrity high and lots of enclosed structures, golden glow
+    const isProtocell = st.enclosed.length >= 3;
+    ctx.strokeStyle = isProtocell
+      ? `rgba(255, 220, 90, ${0.35 + 0.45 * st.integrity})`
+      : `rgba(255, 200, 130, ${0.25 + 0.45 * st.integrity})`;
+    ctx.lineWidth = isProtocell ? 2 : 1.2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 }
 
 function drawHBonds(ctx, world, cellPx) {

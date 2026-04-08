@@ -232,6 +232,14 @@ export default function App() {
             <span className="label">peptides</span>
             <span className="value">{stats.peptides ?? 0}</span>
           </div>
+          <div className="row">
+            <span className="label">lipids</span>
+            <span className="value">{stats.lipids ?? 0}</span>
+          </div>
+          <div className="row">
+            <span className="label">vesicles</span>
+            <span className="value">{stats.membranes ?? 0}</span>
+          </div>
           <ChainHistogram lenHisto={stats.lenHisto} />
         </div>
 
@@ -253,7 +261,7 @@ export default function App() {
           <div className="section-title">phase</div>
           <div className="row">
             <span className="label">build status</span>
-            <span className="value">phase 3 / step 16</span>
+            <span className="value">phase 4 / step 22</span>
           </div>
           <div className="row">
             <span className="label">grid</span>

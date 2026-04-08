@@ -8,6 +8,7 @@ import {
   makeRNA, NUCLEOTIDES, COMPLEMENT, isComplementary, selfComplementarity,
   detectRibozyme, findFreeCodons, CODON_AA,
 } from './rna.js';
+import { makeLipid, makeMembrane, isInsideMembrane } from './lipid.js';
 
 const A_IDX = SPECIES_INDEX.A;
 const U_IDX = SPECIES_INDEX.U;
@@ -265,6 +266,157 @@ export function templatedExtension(world, rates) {
     extended++;
   }
   return extended;
+}
+
+// ─── Phase 4: lipids + membranes (R10, R11) ─────────────────────────────
+
+const FA_IDX = SPECIES_INDEX.FA;
+
+/**
+ * Phase 4 step 17: Lipid nucleation from FA concentration field.
+ *
+ * In wet cells where the local FA concentration exceeds a threshold, spawn
+ * a Lipid particle and consume some FA. Caps the per-tick spawn count to
+ * keep performance bounded.
+ */
+export function nucleateLipids(world, rates) {
+  if (rates.lipidAssembly < 0.05) return 0;
+  const W = world.width;
+  const H = world.height;
+  const fields = world.fields;
+  const NUC_THRESHOLD = 0.4;
+  const N_SAMPLES = 80;
+  let spawned = 0;
+  for (let s = 0; s < N_SAMPLES; s++) {
+    const x = Math.floor(world._rand() * W);
+    const y = Math.floor(world._rand() * H);
+    const k = y * W + x;
+    if (fields[FA_IDX][k] < NUC_THRESHOLD) continue;
+    if (world._rand() >= rates.lipidAssembly * 0.5) continue;
+    fields[FA_IDX][k] = Math.max(0, fields[FA_IDX][k] - 0.3);
+    world.structures.push(makeLipid(x, y, world._rand() * Math.PI * 2));
+    spawned++;
+  }
+  return spawned;
+}
+
+/**
+ * Phase 4 step 18+19: Lipid self-assembly + vesicle formation.
+ *
+ * Each tick, scan unmembraned lipids. For each cluster of ≥8 lipids
+ * within a small radius, form a Membrane object centered on their
+ * centroid. Mark each lipid's membraneId.
+ */
+export function assembleMembranes(world) {
+  const lipids = world.structures.filter(
+    (s) => s.type === 'lipid' && s.membraneId == null,
+  );
+  if (lipids.length < 8) return 0;
+  const W = world.width;
+  const H = world.height;
+  // Cluster scan: pick a random unprocessed lipid as seed, gather neighbors
+  const used = new Set();
+  let formed = 0;
+  for (const seed of lipids) {
+    if (used.has(seed.id)) continue;
+    const cluster = [seed];
+    let cx = seed.position.x;
+    let cy = seed.position.y;
+    const radiusSq = 4 * 4;  // 4-cell gathering radius
+    for (const other of lipids) {
+      if (other === seed || used.has(other.id)) continue;
+      let dx = Math.abs(other.position.x - cx);
+      let dy = Math.abs(other.position.y - cy);
+      if (dx > W / 2) dx = W - dx;
+      if (dy > H / 2) dy = H - dy;
+      if (dx * dx + dy * dy <= radiusSq) {
+        cluster.push(other);
+        cx = (cx * (cluster.length - 1) + other.position.x) / cluster.length;
+        cy = (cy * (cluster.length - 1) + other.position.y) / cluster.length;
+      }
+    }
+    if (cluster.length >= 8) {
+      const m = makeMembrane(cx, cy, cluster.map((c) => c.id));
+      world.structures.push(m);
+      for (const c of cluster) {
+        c.membraneId = m.id;
+        used.add(c.id);
+      }
+      formed++;
+    }
+  }
+  return formed;
+}
+
+/**
+ * Phase 4 step 20+21: Update each membrane's enclosed list, integrity, and
+ * apply tide-driven dissolution. Also dissolve membranes whose lipid count
+ * drops below threshold.
+ */
+export function updateMembranes(world, waterLevel) {
+  const membranes = world.structures.filter((s) => s.type === 'membrane');
+  if (membranes.length === 0) return;
+  const W = world.width;
+  const H = world.height;
+
+  // Build a quick lipid lookup
+  const lipidById = new Map();
+  for (const s of world.structures) {
+    if (s.type === 'lipid') lipidById.set(s.id, s);
+  }
+
+  for (const m of membranes) {
+    // Drop dead lipids
+    m.lipids = m.lipids.filter((id) => lipidById.has(id));
+    if (m.lipids.length < 5) {
+      m.integrity = 0;
+      continue;
+    }
+    // Recompute center
+    let cx = 0, cy = 0;
+    for (const id of m.lipids) {
+      const lp = lipidById.get(id);
+      cx += lp.position.x;
+      cy += lp.position.y;
+    }
+    cx /= m.lipids.length;
+    cy /= m.lipids.length;
+    m.center.x = cx;
+    m.center.y = cy;
+    m.radius = Math.max(3, Math.sqrt(m.lipids.length / Math.PI) * 1.5);
+
+    // Tide effect: dry phase weakens hydrophobic effect
+    if (waterLevel < -0.2) {
+      m.integrity -= 0.005 * Math.abs(waterLevel);
+    } else {
+      m.integrity = Math.min(1, m.integrity + 0.002);
+    }
+
+    // Compute enclosed structures (RNA, peptide, lipid)
+    m.enclosed = [];
+    for (const s of world.structures) {
+      if (s.type === 'membrane') continue;
+      if (s.type === 'lipid' && s.membraneId === m.id) continue;
+      if (isInsideMembrane(m, s.position.x, s.position.y, W, H)) {
+        m.enclosed.push(s.id);
+      }
+    }
+
+    m.age++;
+  }
+
+  // Cull dead membranes (integrity ≤ 0)
+  for (let i = world.structures.length - 1; i >= 0; i--) {
+    const s = world.structures[i];
+    if (s.type === 'membrane' && s.integrity <= 0) {
+      // Free its lipids
+      for (const id of s.lipids) {
+        const lp = lipidById.get(id);
+        if (lp) lp.membraneId = null;
+      }
+      world.structures.splice(i, 1);
+    }
+  }
 }
 
 /**
