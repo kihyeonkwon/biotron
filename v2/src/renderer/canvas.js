@@ -1,11 +1,13 @@
 // Canvas renderer for the surface view.
 //
-// Phase 1 step 1: just draws nucleotide concentrations as additive RGB.
-// A is red, U is cyan, G is green, C is yellow. Higher concentration = brighter.
+// Phase 1 step 1+3: nucleotide concentrations as additive RGB +
+// background temperature tint + translucent water overlay driven by waterLevel.
 //
-// We render straight to an ImageData buffer for speed (no per-pixel canvas calls).
+// We render the (W, H) field to an offscreen ImageData buffer (one pixel per
+// grid cell), then drawImage upscales it to the visible canvas.
 
 import { SPECIES_INDEX, SPECIES_COLOR } from '../simulation/constants.js';
+import { getTemperature, getWaterLevel } from '../simulation/environment.js';
 
 // Cached ImageData buffer (recreated when canvas size changes)
 let cached = null;
@@ -47,24 +49,30 @@ export function renderWorld(canvas, world, cellPx) {
   const cG = SPECIES_COLOR.G;
   const cC = SPECIES_COLOR.C;
 
+  // Phase 1 step 3: temperature tints background; water level adds blue veil.
+  const temperature = getTemperature(world.tickCount);
+  const waterLevel = getWaterLevel(world.tickCount);
+  const bgR = 12 + Math.max(0, temperature) * 50;
+  const bgG = 12 + Math.max(0, -temperature) * 5;
+  const bgB = 18 + Math.max(0, -temperature) * 50;
+
   const data = imgData.data;
   const N = W * H;
   for (let k = 0; k < N; k++) {
     // Each species adds to RGB scaled by its concentration.
-    // Concentration ~ [0, ~0.3]. Multiply by 4 to get reasonable brightness.
-    const a = Math.min(1, fA[k] * 4);
-    const u = Math.min(1, fU[k] * 4);
-    const g = Math.min(1, fG[k] * 4);
-    const c = Math.min(1, fC[k] * 4);
+    // Concentration ~ [0, ~1.5]. Multiply by 1.5 to get reasonable brightness.
+    const a = Math.min(1, fA[k] * 1.5);
+    const u = Math.min(1, fU[k] * 1.5);
+    const g = Math.min(1, fG[k] * 1.5);
+    const c = Math.min(1, fC[k] * 1.5);
 
-    let r = a * cA[0] + u * cU[0] + g * cG[0] + c * cC[0];
-    let gg = a * cA[1] + u * cU[1] + g * cG[1] + c * cC[1];
-    let b = a * cA[2] + u * cU[2] + g * cG[2] + c * cC[2];
+    let r = bgR + a * cA[0] + u * cU[0] + g * cG[0] + c * cC[0];
+    let gg = bgG + a * cA[1] + u * cU[1] + g * cG[1] + c * cC[1];
+    let b = bgB + a * cA[2] + u * cU[2] + g * cG[2] + c * cC[2];
 
-    // Soft saturate
-    r = r > 255 ? 255 : r;
-    gg = gg > 255 ? 255 : gg;
-    b = b > 255 ? 255 : b;
+    if (r > 255) r = 255;
+    if (gg > 255) gg = 255;
+    if (b > 255) b = 255;
 
     const o = k * 4;
     data[o] = r;
@@ -78,4 +86,17 @@ export function renderWorld(canvas, world, cellPx) {
   // Upscale (nearest-neighbor via image-rendering: pixelated on the canvas element)
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(offCanvas, 0, 0, cw, ch);
+
+  // Translucent water overlay: stronger when waterLevel is positive
+  const wet = Math.max(0, waterLevel);
+  if (wet > 0) {
+    ctx.fillStyle = `rgba(60, 130, 220, ${0.05 + wet * 0.18})`;
+    ctx.fillRect(0, 0, cw, ch);
+  }
+  // Dry "exposed surface" tint when waterLevel is negative
+  const dry = Math.max(0, -waterLevel);
+  if (dry > 0) {
+    ctx.fillStyle = `rgba(190, 130, 70, ${dry * 0.07})`;
+    ctx.fillRect(0, 0, cw, ch);
+  }
 }
