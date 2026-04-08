@@ -4,7 +4,7 @@
 // Reactions are batched per-tick by world.tick().
 
 import { N_SPECIES, SPECIES_INDEX } from './constants.js';
-import { makeRNA, NUCLEOTIDES, COMPLEMENT, isComplementary } from './rna.js';
+import { makeRNA, NUCLEOTIDES, COMPLEMENT, isComplementary, selfComplementarity } from './rna.js';
 
 const A_IDX = SPECIES_INDEX.A;
 const U_IDX = SPECIES_INDEX.U;
@@ -258,6 +258,95 @@ export function templatedExtension(world, rates) {
     extended++;
   }
   return extended;
+}
+
+/**
+ * Phase 2 step 11: Degradation + supply (R6).
+ *
+ * - Free monomers in concentration field decay at a constant slow rate.
+ * - RNA chains hydrolyze. Short chains (< 3) easily, long chains rarely.
+ *   Hydrolysis is reduced by self-complementarity (better-folded RNA
+ *   resists more — see SPEC R6 update).
+ * - Edge cells receive fresh monomers during high tide (ocean delivery).
+ */
+export function degradeAndSupply(world, rates) {
+  const fields = world.fields;
+  const N = world.size;
+
+  // 1. Decay free monomers in concentration field
+  const decay = rates.degradation;
+  if (decay > 0) {
+    for (let s = 0; s < N_SPECIES; s++) {
+      const f = fields[s];
+      const factor = 1 - decay;
+      for (let k = 0; k < N; k++) f[k] *= factor;
+    }
+  }
+
+  // 2. Hydrolyze RNA chains
+  const baseHydrolysis = rates.hydrolysis;
+  if (baseHydrolysis > 0) {
+    const dead = [];
+    for (let i = 0; i < world.structures.length; i++) {
+      const st = world.structures[i];
+      if (st.type !== 'rna') continue;
+      const L = st.sequence.length;
+      // Length factor: short → 5x, length 3 → 1x, long → 0.05x
+      let lenFactor;
+      if (L < 3) lenFactor = 5.0;
+      else if (L < 10) lenFactor = 1.0;
+      else if (L < 20) lenFactor = 0.2;
+      else lenFactor = 0.05;
+      // Self-complementarity protection
+      const selfComp = selfComplementarity(st);
+      const foldFactor = 1 - 0.5 * selfComp;
+      // H-bonded chains are doubly protected
+      const pairProtection = st.hBondedTo != null ? 0.3 : 1.0;
+
+      const p = baseHydrolysis * lenFactor * foldFactor * pairProtection;
+      if (world._rand() < p) {
+        // Return the monomers to the local pool
+        const cellIdx = st.position.y * world.width + st.position.x;
+        for (const b of st.sequence) {
+          const fIdx = SPECIES_INDEX[b];
+          fields[fIdx][cellIdx] += 0.04;
+        }
+        dead.push(i);
+      }
+    }
+    // Remove dead chains in reverse order
+    for (let j = dead.length - 1; j >= 0; j--) {
+      const dead_i = dead[j];
+      const st = world.structures[dead_i];
+      // Break any H-bond on the partner
+      if (st.hBondedTo != null) {
+        const partner = _findById(world.structures, st.hBondedTo);
+        if (partner) partner.hBondedTo = null;
+      }
+      world.structures.splice(dead_i, 1);
+    }
+  }
+
+  // 3. Edge supply during high tide
+  if (rates.monomerSupply > 0) {
+    const W = world.width;
+    const H = world.height;
+    const supply = rates.monomerSupply * 0.05;
+    // Supply to top + bottom rows
+    for (let x = 0; x < W; x++) {
+      for (const s of [SPECIES_INDEX.A, SPECIES_INDEX.U, SPECIES_INDEX.G, SPECIES_INDEX.C, SPECIES_INDEX.FA, SPECIES_INDEX.Gly, SPECIES_INDEX.Ala]) {
+        fields[s][x] += supply;
+        fields[s][(H - 1) * W + x] += supply;
+      }
+    }
+    // Supply to left + right columns
+    for (let y = 0; y < H; y++) {
+      for (const s of [SPECIES_INDEX.A, SPECIES_INDEX.U, SPECIES_INDEX.G, SPECIES_INDEX.C, SPECIES_INDEX.FA, SPECIES_INDEX.Gly, SPECIES_INDEX.Ala]) {
+        fields[s][y * W] += supply;
+        fields[s][y * W + (W - 1)] += supply;
+      }
+    }
+  }
 }
 
 // Sample one nucleotide from a cell weighted by its concentration; consume it.

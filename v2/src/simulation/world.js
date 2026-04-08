@@ -12,6 +12,7 @@ import {
   polymerizeRNA,
   processHydrogenBonds,
   templatedExtension,
+  degradeAndSupply,
 } from './reactions.js';
 import { resetRNAIds } from './rna.js';
 
@@ -127,6 +128,9 @@ export class World {
     if (this.structures.length > 1) {
       templatedExtension(this, rates);
     }
+
+    // Phase 2 step 11: degradation + ocean supply (R6)
+    degradeAndSupply(this, rates);
 
     // Phase 1 step 4: structure adsorption / desorption
     if (this.structures.length > 0) {
