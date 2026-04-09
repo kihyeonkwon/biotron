@@ -296,8 +296,8 @@ export function nucleateLipids(world, rates) {
   const W = world.width;
   const H = world.height;
   const fields = world.fields;
-  const NUC_THRESHOLD = 0.4;
-  const N_SAMPLES = 80;
+  const NUC_THRESHOLD = 0.3;
+  const N_SAMPLES = 150;
   let spawned = 0;
   for (let s = 0; s < N_SAMPLES; s++) {
     const x = Math.floor(world._rand() * W);
@@ -445,17 +445,20 @@ export function divideMembranes(world) {
   const membranes = world.structures.filter((s) => s.type === 'membrane');
   if (membranes.length === 0) return 0;
 
-  const DIVISION_THRESHOLD = 20;  // need at least 20 lipids to divide
+  const DIVISION_THRESHOLD = 16;
   let divisions = 0;
   const newDaughters = [];
 
+  // Hard cap on total vesicles to prevent population explosions
+  const MAX_VESICLES = 150;
+  if (membranes.length >= MAX_VESICLES) return 0;
+
   for (const m of membranes) {
     if (m.lipids.length < DIVISION_THRESHOLD) continue;
-    if (m.integrity < 0.6) continue;  // too damaged to divide
-    if (m.age < 30) continue;  // give the parent time to mature
-
-    // Stochastic division: probability rises with size
-    const divProb = 0.005 * (m.lipids.length / DIVISION_THRESHOLD);
+    if (m.integrity < 0.6) continue;
+    if (m.age < 30) continue;
+    // Stochastic division: probability rises with size, but capped
+    const divProb = Math.min(0.015, 0.008 * (m.lipids.length / DIVISION_THRESHOLD));
     if (world._rand() >= divProb) continue;
 
     // Build a quick lipid id → object map (for partitioning by position)
@@ -580,7 +583,10 @@ export function updateMembranes(world, waterLevel) {
     cy /= m.lipids.length;
     m.center.x = cx;
     m.center.y = cy;
-    m.radius = Math.max(3, Math.sqrt(m.lipids.length / Math.PI) * 1.5);
+    // Use the same formula as makeMembrane (sqrt(N/π) * 5) so vesicles don't
+    // shrink between ticks. This was the bug — radius was being clamped to
+    // the old × 1.5 formula every tick, undoing the larger sizing.
+    m.radius = Math.max(6, Math.sqrt(m.lipids.length / Math.PI) * 5);
 
     // Tide effect: dry phase weakens hydrophobic effect
     if (waterLevel < -0.2) {
@@ -736,9 +742,14 @@ function _ribozymeGridByType(world, type) {
   for (const st of world.structures) {
     if (st.type !== 'rna') continue;
     const cf = st.catalyticFunction;
-    if (!cf || cf.type !== type) continue;
-    const k = st.position.y * W + st.position.x;
-    grid[k] += cf.strength;
+    if (!cf) continue;
+    for (const f of cf) {
+      if (f.type === type) {
+        const k = st.position.y * W + st.position.x;
+        grid[k] += f.strength;
+        break;
+      }
+    }
   }
   return grid;
 }

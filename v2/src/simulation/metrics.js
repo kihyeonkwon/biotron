@@ -138,7 +138,7 @@ export function createMilestoneTracker() {
         for (const eid of m.enclosed) {
           const en = idMap.get(eid);
           if (en && en.type === 'rna' && en.catalyticFunction) {
-            types.add(en.catalyticFunction.type);
+            for (const f of en.catalyticFunction) types.add(f.type);
           }
         }
         if (

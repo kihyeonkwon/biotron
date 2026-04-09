@@ -49,7 +49,7 @@ export function makeRNA(sequence, x, y, surfaceBound = true) {
     position: { x, y },
     surfaceBound,
     hBondedTo: null,           // chain id of paired strand, if any
-    catalyticFunction: null,   // {type, strength} | null  (Phase 3)
+    catalyticFunction: null,   // [{type, strength}] | null  (Phase 3 — array)
     attachedAminoAcids: [],    // [{index, aminoAcid}]      (Phase 3)
     age: 0,
   };
@@ -85,20 +85,27 @@ export function resetRNAIds() {
   _nextId = 1;
 }
 
-// Check whether an RNA chain qualifies as a ribozyme. Returns
-// {type, strength} or null. The combined strength formula is
+// Check whether an RNA chain qualifies as a ribozyme.
+// Returns an array of {type, strength} objects (possibly empty).
+// A single chain can have multiple catalytic functions if it contains
+// motifs for several types — biologically realistic, since real ribozymes
+// often have several active sites.
 //   strength = 0.5 * GC_ratio + 0.5 * selfComplementarity
 // per the SPEC R9 update.
 export function detectRibozyme(chain) {
   const seqStr = chain.sequence.join('');
   const L = chain.sequence.length;
+  const out = [];
+  let strength = -1;
   for (const [type, def] of Object.entries(RIBOZYME_MOTIFS)) {
     if (L < def.minLength) continue;
     if (seqStr.indexOf(def.motif) === -1) continue;
-    const strength = 0.5 * gcRatio(chain) + 0.5 * selfComplementarity(chain);
-    return { type, strength };
+    if (strength < 0) {
+      strength = 0.5 * gcRatio(chain) + 0.5 * selfComplementarity(chain);
+    }
+    out.push({ type, strength });
   }
-  return null;
+  return out.length > 0 ? out : null;
 }
 
 // Find all codon positions in a chain that are NOT yet attached to an AA.

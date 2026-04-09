@@ -352,7 +352,9 @@ export class World {
     const hBondedCount = rnaChains.filter((c) => c.hBondedTo != null).length;
     const ribozymes = rnaChains.filter((c) => c.catalyticFunction != null);
     const ribByType = { peptidyl_transferase: 0, rna_replicase: 0, aminoacyl_transferase: 0 };
-    for (const r of ribozymes) ribByType[r.catalyticFunction.type]++;
+    for (const r of ribozymes) {
+      for (const f of r.catalyticFunction) ribByType[f.type]++;
+    }
 
     return {
       tick: this.tickCount,
