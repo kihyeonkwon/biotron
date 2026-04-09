@@ -396,6 +396,156 @@ export function assembleMembranes(world) {
 }
 
 /**
+ * Vesicle growth: each tick, every membrane tries to absorb a few unmembraned
+ * lipid particles in its vicinity. This is how a vesicle gains mass over time
+ * — and the prerequisite for division.
+ */
+export function growMembranes(world) {
+  const W = world.width;
+  const H = world.height;
+  const membranes = world.structures.filter((s) => s.type === 'membrane');
+  if (membranes.length === 0) return;
+  // Index unmembraned lipids by cell for fast lookup
+  const freeLipids = world.structures.filter(
+    (s) => s.type === 'lipid' && s.membraneId == null,
+  );
+  if (freeLipids.length === 0) return;
+
+  for (const m of membranes) {
+    // Search radius: a few cells beyond the membrane edge
+    const searchR2 = (m.radius + 2) * (m.radius + 2);
+    const before = m.lipids.length;
+    for (const lp of freeLipids) {
+      if (lp.membraneId != null) continue;
+      let dx = Math.abs(lp.position.x - m.center.x);
+      let dy = Math.abs(lp.position.y - m.center.y);
+      if (dx > W / 2) dx = W - dx;
+      if (dy > H / 2) dy = H - dy;
+      if (dx * dx + dy * dy > searchR2) continue;
+      // Absorb (probabilistic — not all in range every tick)
+      if (world._rand() < 0.15) {
+        lp.membraneId = m.id;
+        m.lipids.push(lp.id);
+      }
+    }
+  }
+}
+
+/**
+ * Vesicle division: when a vesicle has grown to ≥ 2× initial threshold and
+ * mechanically wants to split (radius too big for surface tension to hold),
+ * divide into two daughter vesicles. The parent's lipids are split ~50/50,
+ * and ENCLOSED STRUCTURES (RNA, peptides) are randomly partitioned between
+ * the two daughters. This is the binary fission step that turns a static
+ * compartment into a propagating cell lineage.
+ */
+export function divideMembranes(world) {
+  const W = world.width;
+  const H = world.height;
+  const membranes = world.structures.filter((s) => s.type === 'membrane');
+  if (membranes.length === 0) return 0;
+
+  const DIVISION_THRESHOLD = 20;  // need at least 20 lipids to divide
+  let divisions = 0;
+  const newDaughters = [];
+
+  for (const m of membranes) {
+    if (m.lipids.length < DIVISION_THRESHOLD) continue;
+    if (m.integrity < 0.6) continue;  // too damaged to divide
+    if (m.age < 30) continue;  // give the parent time to mature
+
+    // Stochastic division: probability rises with size
+    const divProb = 0.005 * (m.lipids.length / DIVISION_THRESHOLD);
+    if (world._rand() >= divProb) continue;
+
+    // Build a quick lipid id → object map (for partitioning by position)
+    const lipidById = new Map();
+    for (const s of world.structures) {
+      if (s.type === 'lipid') lipidById.set(s.id, s);
+    }
+
+    // Pick a random axis (angle) along which to split
+    const axis = world._rand() * Math.PI * 2;
+    const ax = Math.cos(axis);
+    const ay = Math.sin(axis);
+
+    // Partition lipids by which side of the axis line they're on
+    const lipidsA = [];
+    const lipidsB = [];
+    for (const id of m.lipids) {
+      const lp = lipidById.get(id);
+      if (!lp) continue;
+      let dx = lp.position.x - m.center.x;
+      let dy = lp.position.y - m.center.y;
+      // Toroidal wrap
+      if (dx > W / 2) dx -= W;
+      if (dx < -W / 2) dx += W;
+      if (dy > H / 2) dy -= H;
+      if (dy < -H / 2) dy += H;
+      const dot = dx * ax + dy * ay;
+      if (dot >= 0) lipidsA.push(id);
+      else lipidsB.push(id);
+    }
+    if (lipidsA.length < 5 || lipidsB.length < 5) continue;  // need viable halves
+
+    // Compute daughter centers (offset perpendicular to split axis)
+    const offset = m.radius * 0.4;
+    const dxOff = -ay * offset;  // perpendicular
+    const dyOff = ax * offset;
+
+    const cAx = ((m.center.x + dxOff) + W) % W;
+    const cAy = ((m.center.y + dyOff) + H) % H;
+    const cBx = ((m.center.x - dxOff) + W) % W;
+    const cBy = ((m.center.y - dyOff) + H) % H;
+
+    // Build daughters using existing makeMembrane (assigns new ids)
+    const daughterA = makeMembrane(cAx, cAy, lipidsA, m.generation + 1, m.id);
+    const daughterB = makeMembrane(cBx, cBy, lipidsB, m.generation + 1, m.id);
+    daughterA.integrity = 0.7;
+    daughterB.integrity = 0.7;
+
+    // Reassign lipid membraneId
+    for (const id of lipidsA) {
+      const lp = lipidById.get(id);
+      if (lp) lp.membraneId = daughterA.id;
+    }
+    for (const id of lipidsB) {
+      const lp = lipidById.get(id);
+      if (lp) lp.membraneId = daughterB.id;
+    }
+
+    // Partition enclosed structures: each goes to whichever daughter is closer
+    const enclosedSet = new Set(m.enclosed);
+    for (const s of world.structures) {
+      if (!enclosedSet.has(s.id)) continue;
+      let dxA = Math.abs(s.position.x - cAx);
+      let dyA = Math.abs(s.position.y - cAy);
+      if (dxA > W / 2) dxA = W - dxA;
+      if (dyA > H / 2) dyA = H - dyA;
+      let dxB = Math.abs(s.position.x - cBx);
+      let dyB = Math.abs(s.position.y - cBy);
+      if (dxB > W / 2) dxB = W - dxB;
+      if (dyB > H / 2) dyB = H - dyB;
+      if (dxA * dxA + dyA * dyA <= dxB * dxB + dyB * dyB) {
+        daughterA.enclosed.push(s.id);
+      } else {
+        daughterB.enclosed.push(s.id);
+      }
+    }
+
+    // Mark parent for removal, add daughters
+    m.integrity = 0;  // will be culled in updateMembranes next pass
+    m.childCount++;
+    newDaughters.push(daughterA, daughterB);
+    divisions++;
+  }
+
+  // Append daughters
+  for (const d of newDaughters) world.structures.push(d);
+  return divisions;
+}
+
+/**
  * Phase 4 step 20+21: Update each membrane's enclosed list, integrity, and
  * apply tide-driven dissolution. Also dissolve membranes whose lipid count
  * drops below threshold.

@@ -22,7 +22,7 @@ export function makeLipid(x, y, headAngle = 0) {
   };
 }
 
-export function makeMembrane(centerX, centerY, lipidIds) {
+export function makeMembrane(centerX, centerY, lipidIds, generation = 0, parentId = null) {
   // Larger radius so each vesicle can capture multiple ribozymes.
   // 8 lipids → ~8 cell radius (~200 cells interior),
   // 40 lipids → ~18 cell radius (~1000 cells interior).
@@ -36,6 +36,9 @@ export function makeMembrane(centerX, centerY, lipidIds) {
     enclosed: [],          // populated each tick from world.structures
     integrity: 1.0,
     age: 0,
+    generation,            // vesicle lineage depth
+    parentId,              // parent vesicle id (null = spontaneous)
+    childCount: 0,         // how many times this vesicle has divided
   };
 }
 

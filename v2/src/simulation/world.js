@@ -19,6 +19,8 @@ import {
   nucleateLipids,
   assembleMembranes,
   updateMembranes,
+  growMembranes,
+  divideMembranes,
 } from './reactions.js';
 import { resetRNAIds } from './rna.js';
 import { resetLipidIds } from './lipid.js';
@@ -178,6 +180,12 @@ export class World {
       assembleMembranes(this);
     }
 
+    // Phase 4 step 21: vesicle growth + binary fission (cell reproduction)
+    growMembranes(this);
+    if (this.tickCount % 12 === 0) {
+      divideMembranes(this);
+    }
+
     // Phase 4 step 20+21: membrane state update (enclosed list, integrity, dissolution)
     updateMembranes(this, waterLevel);
     this._rebuildCellMembraneIndex();
@@ -333,6 +341,8 @@ export class World {
     const peptides = this.structures.filter((s) => s.type === 'peptide');
     const lipids = this.structures.filter((s) => s.type === 'lipid');
     const membranes = this.structures.filter((s) => s.type === 'membrane');
+    const maxGen = membranes.reduce((m, v) => Math.max(m, v.generation), 0);
+    const totalChildren = membranes.reduce((m, v) => m + v.childCount, 0);
     const lenHisto = {};
     for (const ch of rnaChains) {
       const L = ch.sequence.length;
@@ -359,6 +369,8 @@ export class World {
       peptides: peptides.length,
       lipids: lipids.length,
       membranes: membranes.length,
+      maxVesicleGen: maxGen,
+      vesicleDivisions: totalChildren,
       milestoneStatus: this.milestones.getStatus(),
     };
   }

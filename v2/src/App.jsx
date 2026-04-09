@@ -252,6 +252,14 @@ export default function App() {
             <span className="label">vesicles</span>
             <span className="value">{stats.membranes ?? 0}</span>
           </div>
+          <div className="row">
+            <span className="label">max generation</span>
+            <span className="value">{stats.maxVesicleGen ?? 0}</span>
+          </div>
+          <div className="row">
+            <span className="label">divisions</span>
+            <span className="value">{stats.vesicleDivisions ?? 0}</span>
+          </div>
           <ChainHistogram lenHisto={stats.lenHisto} />
         </div>
 
