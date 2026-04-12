@@ -21,6 +21,8 @@ import {
   updateMembranes,
   growMembranes,
   divideMembranes,
+  applyConvection,
+  fuseMembranes,
 } from './reactions.js';
 import { resetRNAIds } from './rna.js';
 import { resetLipidIds } from './lipid.js';
@@ -174,6 +176,11 @@ export class World {
       formPeptideBonds(this, rates);
     }
 
+    // Convection: temperature-driven bulk flow moves all structures
+    if (this.tickCount % 2 === 0) {
+      applyConvection(this, temperature, waterLevel);
+    }
+
     // Phase 4 steps 17-19: lipid nucleation + membrane self-assembly
     nucleateLipids(this, rates);
     if (this.tickCount % 6 === 0) {
@@ -184,6 +191,11 @@ export class World {
     growMembranes(this);
     if (this.tickCount % 12 === 0) {
       divideMembranes(this);
+    }
+
+    // Vesicle fusion: colliding vesicles merge
+    if (this.tickCount % 8 === 0) {
+      fuseMembranes(this);
     }
 
     // Phase 4 step 20+21: membrane state update (enclosed list, integrity, dissolution)

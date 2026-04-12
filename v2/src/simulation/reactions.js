@@ -549,6 +549,124 @@ export function divideMembranes(world) {
 }
 
 /**
+ * Convection: temperature-driven bulk flow that moves ALL structures.
+ *
+ * When there's a temperature gradient (warm = convection), structures
+ * drift slowly. This is what makes vesicles collide and the world feel
+ * alive. Direction rotates slowly (like a convection cell in a pot).
+ *
+ * - Wet conditions amplify convection (water carries things).
+ * - Dry conditions suppress it (everything stuck to surface).
+ * - Surface-bound structures resist movement.
+ */
+export function applyConvection(world, temperature, waterLevel) {
+  const wet = Math.max(0, waterLevel);
+  const warm = Math.max(0, temperature);
+  const strength = 0.3 * wet + 0.2 * warm;
+  if (strength < 0.05) return;
+
+  const W = world.width;
+  const H = world.height;
+  // Slowly rotating flow direction (convection cell pattern)
+  const angle = (world.tickCount * 0.003) + Math.sin(world.tickCount * 0.0007) * 1.5;
+  const fx = Math.cos(angle) * strength;
+  const fy = Math.sin(angle) * strength;
+
+  for (const s of world.structures) {
+    if (s.type === 'membrane') continue;  // membranes move via their lipids
+    if (s.surfaceBound && world._rand() > 0.05) continue;  // surface-bound resist
+
+    // Probability of moving 1 cell in the flow direction
+    const moveProb = strength * (s.type === 'lipid' ? 0.8 : 0.3);
+    if (world._rand() >= moveProb) continue;
+
+    // Move by rounding the flow vector (1-cell steps)
+    const dx = Math.abs(fx) > world._rand() ? Math.sign(fx) : 0;
+    const dy = Math.abs(fy) > world._rand() ? Math.sign(fy) : 0;
+    if (dx === 0 && dy === 0) continue;
+
+    s.position.x = ((s.position.x + dx) + W) % W;
+    s.position.y = ((s.position.y + dy) + H) % H;
+  }
+}
+
+/**
+ * Vesicle fusion: when two vesicles overlap significantly, they merge.
+ *
+ * Lipid bilayer fusion is a real physical process — when two vesicles
+ * collide and their membranes contact, they can merge into one larger
+ * vesicle. The combined contents end up inside the merged cell.
+ */
+export function fuseMembranes(world) {
+  const membranes = world.structures.filter((s) => s.type === 'membrane');
+  if (membranes.length < 2) return 0;
+
+  const W = world.width;
+  const H = world.height;
+  const merged = new Set();  // ids of membranes that got absorbed
+  let fusions = 0;
+
+  for (let i = 0; i < membranes.length; i++) {
+    const a = membranes[i];
+    if (merged.has(a.id)) continue;
+    for (let j = i + 1; j < membranes.length; j++) {
+      const b = membranes[j];
+      if (merged.has(b.id)) continue;
+
+      // Distance between centers (toroidal)
+      let dx = Math.abs(a.center.x - b.center.x);
+      let dy = Math.abs(a.center.y - b.center.y);
+      if (dx > W / 2) dx = W - dx;
+      if (dy > H / 2) dy = H - dy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const overlap = (a.radius + b.radius) - dist;
+
+      // Need significant overlap (>30% of smaller radius) to fuse
+      const minR = Math.min(a.radius, b.radius);
+      if (overlap < minR * 0.3) continue;
+
+      // Stochastic: rare — most collisions bounce, not fuse.
+      // This prevents everything from merging into one mega-vesicle.
+      if (world._rand() > 0.03) continue;
+
+      // Size penalty: very large vesicles resist fusion (surface tension)
+      if (a.lipids.length + b.lipids.length > 60) continue;
+
+      // Merge b into a
+      // Transfer lipids
+      const lipidById = new Map();
+      for (const s of world.structures) {
+        if (s.type === 'lipid') lipidById.set(s.id, s);
+      }
+      for (const lid of b.lipids) {
+        a.lipids.push(lid);
+        const lp = lipidById.get(lid);
+        if (lp) lp.membraneId = a.id;
+      }
+      // Transfer enclosed
+      for (const eid of b.enclosed) {
+        if (!a.enclosed.includes(eid)) a.enclosed.push(eid);
+      }
+      // Recenter to weighted average
+      const totalLipids = a.lipids.length;
+      a.center.x = (a.center.x * (totalLipids - b.lipids.length) + b.center.x * b.lipids.length) / totalLipids;
+      a.center.y = (a.center.y * (totalLipids - b.lipids.length) + b.center.y * b.lipids.length) / totalLipids;
+      // Keep the higher generation
+      a.generation = Math.max(a.generation, b.generation);
+      a.integrity = Math.min(1, a.integrity);
+
+      // Mark b for removal
+      b.integrity = 0;
+      b.lipids = [];
+      merged.add(b.id);
+      fusions++;
+      break;  // a changed shape, don't fuse again this tick
+    }
+  }
+  return fusions;
+}
+
+/**
  * Phase 4 step 20+21: Update each membrane's enclosed list, integrity, and
  * apply tide-driven dissolution. Also dissolve membranes whose lipid count
  * drops below threshold.
